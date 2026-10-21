@@ -1,0 +1,7 @@
+schema = 1
+id = "omp-stretch"
+name = "omp stretch"
+version = "0.1.0"
+description = "Routes clicks on omp stretchtext links (cc-stretch.invalid) to the omp process that drew them"
+icon = "link"
+window = "window.luau"

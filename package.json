@@ -1,0 +1,26 @@
+{
+	"name": "omp-stretch",
+	"version": "0.1.0",
+	"description": "Stretchtext replies for omp in Tern: read each reply's gist, click a phrase to grow its detail in place",
+	"type": "module",
+	"omp": {
+		"extensions": ["./stretch.ts"]
+	},
+	"scripts": {
+		"test": "bun test"
+	},
+	"keywords": ["omp", "plugin", "stretchtext", "tern", "progressive-disclosure"],
+	"author": "materemias",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/materemias/omp-stretch.git"
+	},
+	"bugs": {
+		"url": "https://github.com/materemias/omp-stretch/issues"
+	},
+	"homepage": "https://github.com/materemias/omp-stretch#readme",
+	"engines": {
+		"omp": ">=18.11.0"
+	}
+}
