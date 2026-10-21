@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 (2026-10-21)
 
-First version, to be released as 0.1.0.
+First release.
 
 - omp extension `stretch.ts`: the model writes `{{short|long}}` stretches; in Tern each short form is a link that grows its long form in place, with `«` to collapse it. Nested stretches open one level at a time.
 - Hidden read note on the next prompt, listing the stretches you opened and the ones you didn't.
