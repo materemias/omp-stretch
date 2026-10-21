@@ -15,6 +15,7 @@ First version, to be released as 0.1.0.
 - `/stretch dense | light | off` with argument completion. `dense` is the default. The choice is saved in `~/.omp/agent/stretch.json` and applies to every omp process. `/stretch status` shows this process's mode, the saved mode, whether reply drawing is patched and whether clicks work.
 - Tern plugin `omp-stretch` (`tern-plugin/`): routes clicks on `cc-stretch.invalid` links to the omp process that drew them, and styles stretch links as accent text with a dotted underline on hover.
 - `bridge` interface (version 1) on `globalThis[Symbol.for("omp-stretch")]`, used by tern-awui to show and open the same stretches on the phone. Stretch keys are the contract: tern-awui keeps its own copy of `stretch-core.ts`, so a change to how keys are built must reach both.
+- README points to [tern-awui](https://github.com/materemias/tern-awui), which shows the same stretches on the phone and keeps them in sync with the Tern pane.
 - omp plugin marketplace: the repo is its own marketplace (`.omp-plugin/marketplace.json`, named `omp-stretch`), so `omp plugin marketplace add materemias/omp-stretch` and `omp plugin install omp-stretch@omp-stretch` install it; `package.json` declares `stretch.ts` as the extension.
 - Releases: pushing a `vX.Y.Z` tag publishes a GitHub release with that version's section of this changelog as its notes (`.github/workflows/release.yml`), after the tests pass.
 - MIT license, including cc-stretch's copyright notice for the ported parser, growth logic and guide text.
