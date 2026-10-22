@@ -1,7 +1,7 @@
-// Stands in for Anthropic's Messages API during a take: streams REPLY, or LIGHT_REPLY when the
-// system prompt carries the light guide, so the film shows omp drawing a fixed reply.
+// Stands in for Anthropic's Messages API during a take: streams REPLY, LIGHT_REPLY when the system
+// prompt carries the light guide, or DEEPEN_REPLY to a ✦ press, so the film shows omp drawing fixed replies.
 //   bun film/fake-model.ts [port]
-import { LIGHT_REPLY, REPLY } from "./script.ts";
+import { DEEPEN_REPLY, LIGHT_REPLY, REPLY } from "./script.ts";
 
 const port = Number(process.argv[2] ?? 4599);
 const CHUNK = 6;
@@ -30,14 +30,18 @@ Bun.serve({
   async fetch(req) {
     const url = new URL(req.url);
     if (!url.pathname.endsWith("/messages")) return new Response("{}", { headers: { "content-type": "application/json" } });
-    const body = (await req.json()) as { system?: unknown; stream?: boolean };
+    const body = (await req.json()) as { system?: unknown; messages?: unknown[] };
     const isLight = JSON.stringify(body.system ?? "").includes("a sentence or two per paragraph");
-    const chunks = events(isLight ? LIGHT_REPLY : REPLY);
+    // A ✦ press is a side request whose last message asks for more on one section.
+    const isDeepen = JSON.stringify(body.messages?.at(-1) ?? "").includes("pressed ✦ to ask");
+    const chunks = events(isDeepen ? DEEPEN_REPLY : isLight ? LIGHT_REPLY : REPLY);
     const stream = new ReadableStream({
       async start(controller) {
+        // A ✦ answer starts after a pause, as a model's thinking would, so the twinkle and its seconds show.
+        if (isDeepen) await Bun.sleep(2200);
         for (const c of chunks) {
           controller.enqueue(new TextEncoder().encode(c));
-          await Bun.sleep(25);
+          await Bun.sleep(isDeepen ? 45 : 25);
         }
         controller.close();
       },

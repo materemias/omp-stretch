@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- ✦ deepen control: a stretch that is open, with every stretch inside it open too, ends in `✦ «` (stretches ending on the same word share one). A press asks the model for more on that section in a side turn (`runEphemeralTurn`) over the whole conversation, without adding it to the transcript. The answer streams in where it will stay, then becomes a new open `✦` stretch that can hold stretches of its own and be deepened again.
+- While a press waits, the ✦ twinkles with a seconds count until the first words arrive. ✦ appears only after its stretch has finished growing. A running press redraws its reply once a second instead of ten times, to make it less likely that a redraw replaces a link while it is being clicked.
+- Answers are saved as `omp-stretch.deepen` session entries and come back on resume, reload, session switch and `/tree`. The next read note reports each answer in full; answers saved after the last note that reported answers are reported after a restart too, and never in another session.
+- An answer is refused with a toast if, once spliced into the reply, it would close or swallow stretches around it (a stray `}}`, an unclosed fence, a lone backtick pairing with later code), or if it is empty or over 2,000 characters.
+- Presses keep the main turn's tools and history so the provider serves the conversation from its prompt cache, cap output at 1,500 tokens where that leaves the request unchanged, and get the full reply (`dedupeReply: false`). A session switch or `/tree` move aborts a running press; a fork keeps it.
+- A growing stretch is tracked by key, so a spliced answer never makes the animation grow the wrong stretch. Stretches inside answers are included in the read note.
+- Stretches that end on the same word share one `«` instead of stacking a row of them: each click closes the innermost and the next takes its place. ✦ stands before its `«`.
+- tern-awui can press ✦ through the version 1 bridge and receive saved answers and running requests. Opening, closing and deepening on the phone use the same pane state and model. The phone renders the twinkle, elapsed seconds and streamed text without an omp-stretch package dependency.
+- README: "Ask for more" section on ✦ and its cost, and ✦ in the intro. The demo GIF and MP4 now show a ✦ press: the twinkle and seconds count, the answer streaming in, and a stretch inside the answer opened (`film/` gains a ✦ scene and a fake-model answer for it).
+
 ## 0.1.0 (2026-10-21)
 
 First release.

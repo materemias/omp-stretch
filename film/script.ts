@@ -9,6 +9,9 @@ export const REPLY = `{{Rebase replays your commits on a new base.|Rebase takes 
 - {{Safe on a branch only you use.|Safe on a branch only you use, since nobody else holds the old hashes.}}
 - {{Shared branches need a force push.|Shared branches need a force push afterwards, and everyone who pulled must reset to the new history.}}`;
 
+// The answer to a ✦ press on "a hash covers its parent": it reads on after that stretch's last word.
+export const DEEPEN_REPLY = `So {{one changed commit changes every hash after it.|one changed commit changes every hash after it: its new hash goes into its child's hash, that one into the next, all the way to the tip of the branch.}}`;
+
 export const LIGHT_QUESTION = "How do I undo a rebase that went wrong?";
 
 export const LIGHT_REPLY = `Right after the rebase, \`git reset --hard ORIG_HEAD\` puts your branch back where it was. {{Git saved that spot for you.|Git saved the old tip in \`ORIG_HEAD\` before the rebase started, and the old commits stay in the repository even though no branch points at them.}}

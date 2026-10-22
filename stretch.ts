@@ -21,9 +21,17 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import type { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import {
+  canDeepen,
+  type DeepenAnswer,
+  deepenNote,
+  deepenPrompt,
+  DEEPEN,
+  DEEPEN_REPORTED,
+  spliceAnswer,
+  TWINKLE_MS,
   isLinkable,
   KEY_SEPARATOR,
   lengthOf,
@@ -35,6 +43,7 @@ import {
   streamingView,
   type Stretch,
   stretches,
+  withAnswers,
   writeOpen,
 } from "./stretch-core.ts";
 
@@ -51,6 +60,10 @@ const Component: typeof AssistantMessageComponent | undefined = await import(
 );
 
 const NOTE_TYPE = "cc-stretch.read";
+/** Session entry holding one ✦ answer: `{ block, key, text }`, never sent to the model. */
+const DEEPEN_TYPE = "omp-stretch.deepen";
+/** Output tokens a ✦ press may use, reasoning included, on transports that honour a cap. */
+const DEEPEN_MAX_TOKENS = 1500;
 const HREF = `https://cc-stretch.invalid/${process.pid}/`;
 // Without XDG_RUNTIME_DIR, one folder per user in /tmp, so one user's 0700 folder never locks out another.
 // The Tern plugin builds the same path.
@@ -64,7 +77,7 @@ const FRAME_MS = 33;
 /** A text block of one reply: `${message.timestamp}.${contentIndex}`, the index in the whole reply. */
 type BlockId = string;
 
-type Growth = { timestamp: number; block: BlockId; index: number; start: number; duration: number };
+type Growth = { timestamp: number; block: BlockId; key: string; start: number; duration: number };
 type Content = AssistantMessage["content"];
 
 /**
@@ -103,16 +116,47 @@ type Shared = {
   original?: AssistantMessageComponent["updateContent"];
   /** For tern-awui's tern-mobile extension, while the patch is installed: see `bridge` below. */
   bridge?: StretchBridge;
+  /** ✦ answers per block, spliced into the block's text before it is parsed. */
+  answers: Map<BlockId, DeepenAnswer[]>;
+  /** Each ✦ press still waiting, by `${blockId}\0${key}`: when it started and the answer so far. */
+  running: Map<string, { start: number; partial: string }>;
+  /**
+   * Answers the current session's next note must report: the model never saw them. Rebuilt from the
+   * session on every start and switch, so they never reach another session and survive a restart.
+   */
+  deepened: { section: string; text: string }[];
+  /** The main session's side turn, its entry writer and its toasts; unset outside the main Tern TUI. */
+  ask?: (promptText: string, onDelta: (delta: string) => void, signal: AbortSignal) => Promise<string>;
+  save?: (entry: { block: BlockId; section: string } & DeepenAnswer) => void;
+  warn?: (message: string) => void;
+  /** Aborted when the main session or its branch changes: a press running then has nowhere to land. */
+  presses?: AbortController;
+  /** Adds stretches written after `message_end` (inside ✦ answers) to the next read note. */
+  wrote?: (written: { id: string; short: string }[]) => void;
+  /** This import's click reader: the watcher outlives a reload, the reader must not. */
+  drain?: () => void;
 };
 
 /**
  * What another extension in this omp process may use (tern-awui's tern-mobile, so its phone view
  * shows and opens the same stretches): the open keys per block, and opening one as a click does.
+ * The ✦ fields and `deepen` are additions to version 1: a reader that predates them ignores them.
  */
 type StretchBridge = {
   version: 1;
-  state(): { off: boolean; open: Record<BlockId, string[]> };
+  state(): {
+    off: boolean;
+    open: Record<BlockId, string[]>;
+    /** Whether a ✦ press can run in this session (the main Tern TUI, on an omp with side turns). */
+    deepen: boolean;
+    /** ✦ answers per block, in the order they were given; spliced in with `withAnswers`. */
+    answers: Record<BlockId, DeepenAnswer[]>;
+    /** Presses still running per block: the stretch, whole seconds waited, and the answer so far. */
+    running: Record<BlockId, { key: string; seconds: number; partial: string }[]>;
+  };
   setOpen(block: BlockId, key: string, open: boolean): void;
+  /** Press ✦ on the stretch `key` of `block`, as a click in the pane does. */
+  deepen(block: BlockId, key: string): void;
 };
 // A reload keeps the state an older import created: add whatever fields it predates.
 const state = ((globalThis as Record<symbol, Partial<Shared> | undefined>)[Symbol.for("omp-stretch")] ??= {});
@@ -122,10 +166,25 @@ state.shown ??= new Map();
 state.segments ??= new WeakMap();
 state.replies ??= new Map();
 state.sources ??= new WeakMap();
+state.answers ??= new Map();
+state.running ??= new Map();
+state.deepened ??= [];
 delete (state as { produced?: unknown }).produced;
 const shared = state as Shared;
-const { openKeys, seen, shown, segments, replies, sources } = shared;
+const { openKeys, seen, shown, segments, replies, sources, answers, running } = shared;
 const modeOf = (): Mode => shared.mode ?? "dense";
+
+/** One block's text with its ✦ answers spliced in; cached per answer list, which a new answer replaces. */
+const splicedCache = new WeakMap<readonly DeepenAnswer[], { text: string; out: string }>();
+function spliced(id: BlockId, text: string): string {
+  const list = answers.get(id);
+  if (list === undefined) return text;
+  const hit = splicedCache.get(list);
+  if (hit?.text === text) return hit.out;
+  const out = withAnswers(text, list);
+  splicedCache.set(list, { text, out });
+  return out;
+}
 
 const hasMarkup = (content: Content) => content.some(block => block.type === "text" && block.text.includes("{{"));
 
@@ -144,19 +203,28 @@ function wholeReply(segment: AssistantMessage): AssistantMessage {
 function view(segment: AssistantMessage, whole: AssistantMessage | undefined): AssistantMessage {
   const content = segment.content.map((block, i) => {
     if (block.type !== "text" || !block.text.includes("{{")) return block;
-    const parts = parse(block.text);
-    if (stretches(parts).length === 0) return block;
-    if (whole === undefined) return { ...block, text: streamingView(parts) };
-    if (!CLICKABLE || shared.mode === "off") return { ...block, text: writeOpen(parts) };
+    if (whole === undefined) {
+      const parts = parse(block.text);
+      return stretches(parts).length === 0 ? block : { ...block, text: streamingView(parts) };
+    }
     const found = whole.content.findIndex(b => b.type === "text" && b.text === block.text);
     const at = found === -1 ? i : found;
     const id: BlockId = `${segment.timestamp}.${at}`;
+    const parts = parse(spliced(id, block.text));
+    if (stretches(parts).length === 0) return block;
+    if (!CLICKABLE || shared.mode === "off") return { ...block, text: writeOpen(parts) };
     const open = openKeys.get(id);
     const now = shared.growing?.block === id ? shared.growing : undefined;
     const text = linkedMarkdown(parts, {
       href: (op, index) => `${HREF}${op}/${segment.timestamp}/${at}/${index}`,
       isOpen: key => open?.has(key) === true,
-      growing: now && { index: now.index, progress: Math.min(1, (Date.now() - now.start) / now.duration) },
+      growing: now && { key: now.key, progress: Math.min(1, (Date.now() - now.start) / now.duration) },
+      deepen: shared.ask && {
+        progress: key => {
+          const press = running.get(`${id}\0${key}`);
+          return press && { elapsedMs: Date.now() - press.start, partial: press.partial };
+        },
+      },
     });
     return { ...block, text };
   });
@@ -192,6 +260,7 @@ function patch(): void {
   // A reload imports this file again while the patch stays: hand out this import's bridge, and
   // install this import's wrapper, so drawing uses its view and not the previous import's.
   shared.bridge = bridge;
+  shared.drain = drainClicks;
   const proto = Component.prototype;
   if (proto.updateContent === wrapper) return;
   shared.original ??= proto.updateContent;
@@ -227,9 +296,15 @@ function redraw(timestamp: number): void {
 
 type Found = { stretch: Stretch; index: number };
 
-function stretchAt(timestamp: number, blockIndex: number, pick: (all: Stretch[]) => number): Found | undefined {
+/** The block's stretches, ✦ answers spliced in, as its links number them. */
+function allStretches(timestamp: number, blockIndex: number): Stretch[] {
   const block = shown.get(timestamp)?.message.content[blockIndex];
-  const all = block?.type === "text" ? stretches(parse(block.text)) : [];
+  if (block?.type !== "text") return [];
+  return stretches(parse(spliced(`${timestamp}.${blockIndex}`, block.text)));
+}
+
+function stretchAt(timestamp: number, blockIndex: number, pick: (all: Stretch[]) => number): Found | undefined {
+  const all = allStretches(timestamp, blockIndex);
   const index = pick(all);
   const stretch = all[index];
   return stretch === undefined ? undefined : { stretch, index };
@@ -238,7 +313,65 @@ function stretchAt(timestamp: number, blockIndex: number, pick: (all: Stretch[])
 function click(op: LinkOp, timestamp: number, blockIndex: number, index: number): void {
   const found = stretchAt(timestamp, blockIndex, () => index);
   if (found === undefined || !isLinkable(found.stretch)) return;
-  setOpen(timestamp, blockIndex, found.stretch.key, op === "open", found);
+  if (op === "deepen") void deepen(timestamp, blockIndex, found);
+  else setOpen(timestamp, blockIndex, found.stretch.key, op === "open", found);
+}
+
+/**
+ * A ✦ press: ask the model, in a side turn over the whole conversation, for what comes next inside
+ * one fully open stretch. While it waits the ✦ twinkles with a seconds count, the answer streams in
+ * where it will land, and the finished answer stays there as a new open `✦` stretch.
+ */
+async function deepen(timestamp: number, blockIndex: number, found: Found): Promise<void> {
+  const { stretch } = found;
+  const id: BlockId = `${timestamp}.${blockIndex}`;
+  const tag = `${id}\0${stretch.key}`;
+  const signal = shared.presses?.signal;
+  const open = (key: string) => openKeys.get(id)?.has(key) === true;
+  if (!shared.ask || !signal || running.has(tag) || !isLinkable(stretch) || !canDeepen(stretch, open)) return;
+  const press = { start: Date.now(), partial: "" };
+  running.set(tag, press);
+  // Redraw while the press runs: the twinkle and the seconds move even before any text arrives.
+  const tick = () => {
+    if (running.get(tag) !== press) return;
+    try {
+      redraw(timestamp);
+    } catch {}
+    setTimeout(tick, TWINKLE_MS).unref();
+  };
+  tick();
+  try {
+    const parents = allStretches(timestamp, blockIndex)
+      .filter(s => stretch.key.startsWith(s.key + KEY_SEPARATOR))
+      .map(s => s.short);
+    const section = writeOpen(stretch.long);
+    const reply = await shared.ask(deepenPrompt(section, parents), delta => {
+      press.partial += delta;
+    }, signal);
+    // A switch or a /tree move aborted the press; a fork keeps it, and it lands in the forked session.
+    if (signal.aborted) return;
+    const block = shown.get(timestamp)?.message.content[blockIndex];
+    const answer =
+      block?.type === "text" ? spliceAnswer(block.text, answers.get(id) ?? [], stretch.key, reply) : undefined;
+    if (answer === undefined) {
+      shared.warn?.(`${DEEPEN} The answer came back empty, too long or with broken markup; press again to retry.`);
+      return;
+    }
+    answers.set(id, [...(answers.get(id) ?? []), { key: stretch.key, text: answer.text }]);
+    shared.deepened.push({ section, text: answer.text });
+    shared.save?.({ block: id, section, key: stretch.key, text: answer.text });
+    shared.wrote?.(answer.nested.filter(isLinkable).map(s => ({ id: `${id}\0${s.key}`, short: s.short })));
+    // Open at once, without growing: the streamed text is already on screen.
+    const open = openKeys.get(id) ?? new Set<string>();
+    openKeys.set(id, open);
+    open.add(answer.key);
+    seen.add(`${id}\0${answer.key}`);
+  } catch (error) {
+    if (!signal.aborted) shared.warn?.(`${DEEPEN} failed: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    running.delete(tag);
+    redraw(timestamp);
+  }
 }
 
 /**
@@ -262,7 +395,7 @@ function setOpen(timestamp: number, blockIndex: number, key: string, isOpen: boo
   const at = found ?? stretchAt(timestamp, blockIndex, all => all.findIndex(s => s.key === key));
   if (at === undefined) return;
   const duration = Math.min(700, 45 * lengthOf(at.stretch.long ?? []));
-  const now: Growth = { timestamp, block: id, index: at.index, start: Date.now(), duration };
+  const now: Growth = { timestamp, block: id, key, start: Date.now(), duration };
   const previous = shared.growing;
   shared.growing = now;
   // The growth this one replaces stops ticking: draw its reply at full length.
@@ -282,13 +415,31 @@ function setOpen(timestamp: number, blockIndex: number, key: string, isOpen: boo
 
 const bridge: StretchBridge = {
   version: 1,
-  state: () => ({
-    off: shared.mode === "off",
-    open: Object.fromEntries([...openKeys].filter(([, keys]) => keys.size > 0).map(([id, keys]) => [id, [...keys]])),
-  }),
+  state: () => {
+    const presses: Record<BlockId, { key: string; seconds: number; partial: string }[]> = {};
+    for (const [tag, press] of running) {
+      const [block = "", key = ""] = tag.split("\0");
+      // Whole seconds, so a press changes the reported state once a second, not every redraw.
+      (presses[block] ??= []).push({ key, seconds: Math.floor((Date.now() - press.start) / 1000), partial: press.partial });
+    }
+    return {
+      off: shared.mode === "off",
+      open: Object.fromEntries([...openKeys].filter(([, keys]) => keys.size > 0).map(([id, keys]) => [id, [...keys]])),
+      deepen: shared.ask !== undefined && CLICKABLE,
+      answers: Object.fromEntries([...answers].filter(([, list]) => list.length > 0)),
+      running: presses,
+    };
+  },
   setOpen: (block, key, open) => {
     const match = /^(\d+)\.(\d+)$/.exec(block);
     if (match && key !== "") setOpen(Number(match[1]), Number(match[2]), key, open);
+  },
+  deepen: (block, key) => {
+    const match = /^(\d+)\.(\d+)$/.exec(block);
+    if (!match || key === "") return;
+    const [timestamp, blockIndex] = [Number(match[1]), Number(match[2])];
+    const found = stretchAt(timestamp, blockIndex, all => all.findIndex(s => s.key === key));
+    if (found !== undefined && isLinkable(found.stretch)) void deepen(timestamp, blockIndex, found);
   },
 };
 
@@ -305,7 +456,7 @@ function drainClicks(): void {
     } catch {
       continue;
     }
-    const match = /^(open|close)\/(\d+)\/(\d+)\/(\d+)$/.exec(body);
+    const match = /^(open|close|deepen)\/(\d+)\/(\d+)\/(\d+)$/.exec(body);
     if (match) click(match[1] as LinkOp, Number(match[2]), Number(match[3]), Number(match[4]));
   }
 }
@@ -325,7 +476,7 @@ function watchClicks(): void {
   // The callback runs outside handler isolation: a throw here would end the session.
   shared.watcher = watch(CLICK_DIR, () => {
     try {
-      drainClicks();
+      shared.drain?.();
     } catch {}
   });
   shared.watcher.unref();
@@ -388,6 +539,7 @@ export default function stretch(pi: ExtensionAPI): void {
   patch();
   /** Linkable stretches of the main session's replies since the last note. */
   let pending: { id: string; short: string }[] = [];
+  shared.wrote = written => pending.push(...written);
   /** Set by `/stretch` when the mode changes, until the next prompt tells the model. */
   let switched: Mode | undefined;
   const isMainTui = (ctx: { mode: string; agent: { kind: string } }) =>
@@ -443,15 +595,59 @@ export default function stretch(pi: ExtensionAPI): void {
     },
   });
 
-  /** Where `wholeReply` looks for a reply drawn from history. */
-  const followBranch = (ctx: { sessionManager: { getBranch(): readonly unknown[] } }) => {
+  /**
+   * Follow the main session: its branch for `wholeReply`, its side turn and entries for ✦. Unless
+   * `keepPresses` (a fork, whose transcript stays on screen), presses still running are abandoned.
+   */
+  const followSession = (ctx: ExtensionContext, keepPresses = false) => {
     shared.branch = () => ctx.sessionManager.getBranch();
+    if (!keepPresses || !shared.presses) {
+      shared.presses?.abort();
+      shared.presses = new AbortController();
+    }
+    // Same model, system prompt, tools and history as the main turn, so the provider serves all of it
+    // from the prompt cache; `tools: false` would change the prefix and miss it entirely. The output
+    // cap bounds a press's cost, but only where it leaves the request as it is: on a budget-thinking
+    // model a cap turns thinking off, which changes the cached request, and Codex or Cursor refuse a
+    // cap before inference. `dedupeReply: false` hands over the reply whole; spliceAnswer judges it.
+    shared.ask = ctx.runEphemeralTurn
+      ? async (promptText, onDelta, signal) => {
+          const thinking = ctx.model?.thinking?.mode;
+          const budget = thinking === "budget" || thinking === "anthropic-budget-effort";
+          const turn = { promptText, onTextDelta: onDelta, signal, dedupeReply: false };
+          if (budget && String(pi.getThinkingLevel()) !== "off") return (await ctx.runEphemeralTurn!(turn)).replyText;
+          try {
+            return (await ctx.runEphemeralTurn!({ ...turn, maxTokens: DEEPEN_MAX_TOKENS })).replyText;
+          } catch (error) {
+            if (!String(error).includes("Omit the cap")) throw error;
+            return (await ctx.runEphemeralTurn!(turn)).replyText;
+          }
+        }
+      : undefined;
+    shared.save = entry => pi.appendEntry(DEEPEN_TYPE, entry);
+    shared.warn = message => ctx.ui.notify(message, "warning");
+    // Answers live in the session file, so a resumed or reloaded session shows them again. Those
+    // after the branch's last note that reported answers were never reported: the next note does.
+    answers.clear();
+    shared.deepened.length = 0;
+    type Entry = { type?: string; customType?: string; content?: unknown; data?: unknown };
+    for (const entry of ctx.sessionManager.getBranch() as Entry[]) {
+      if (entry.type === "custom_message" && entry.customType === NOTE_TYPE) {
+        if (typeof entry.content === "string" && entry.content.includes(DEEPEN_REPORTED)) shared.deepened.length = 0;
+        continue;
+      }
+      if (entry.type !== "custom" || entry.customType !== DEEPEN_TYPE) continue;
+      const data = entry.data as Partial<{ block: string; section: string; key: string; text: string }> | undefined;
+      if (typeof data?.block !== "string" || typeof data.key !== "string" || typeof data.text !== "string") continue;
+      answers.set(data.block, [...(answers.get(data.block) ?? []), { key: data.key, text: data.text }]);
+      shared.deepened.push({ section: data.section ?? "", text: data.text });
+    }
   };
 
   pi.on("session_start", (_event, ctx) => {
     patch();
     if (!isMainTui(ctx)) return;
-    followBranch(ctx);
+    followSession(ctx);
     watchClicks();
     // Borrow the TUI handle from a throwaway widget: a click redraw happens outside any render cycle.
     ctx.ui.setWidget("omp-stretch", tui => {
@@ -463,11 +659,17 @@ export default function stretch(pi: ExtensionAPI): void {
   pi.on("session_switch", (event, ctx) => {
     patch();
     pending = [];
-    if (isMainTui(ctx)) followBranch(ctx);
+    if (isMainTui(ctx)) followSession(ctx, event.reason === "fork");
     // A fork keeps the transcript on screen, so its replies must stay clickable.
     if (event.reason === "fork") return;
     shown.clear();
     replies.clear();
+  });
+  // /tree moves to another branch of the same session: its answers and unreported notes differ.
+  pi.on("session_tree", (_event, ctx) => {
+    if (!isMainTui(ctx)) return;
+    followSession(ctx);
+    for (const timestamp of [...shown.keys()]) redraw(timestamp);
   });
   pi.on("session_shutdown", (_event, ctx) => {
     if (ctx.agent.kind === "main") unpatch();
@@ -501,6 +703,8 @@ export default function stretch(pi: ExtensionAPI): void {
     switched = undefined;
     const mode = modeOf();
     const transition = promptTransition(event.systemPrompt, mode, told, pending, seen);
+    const added = mode === "off" ? undefined : deepenNote(shared.deepened.splice(0));
+    const content = [transition.content, added].filter(text => text !== undefined).join(" ") || undefined;
     if (mode !== "off") {
       pending = [];
       // The note just reported every opening that counts; later ones belong to replies still to come.
@@ -508,9 +712,7 @@ export default function stretch(pi: ExtensionAPI): void {
     }
     return {
       systemPrompt: transition.systemPrompt,
-      message: transition.content === undefined
-        ? undefined
-        : { customType: NOTE_TYPE, content: transition.content, display: false },
+      message: content === undefined ? undefined : { customType: NOTE_TYPE, content, display: false },
     };
   });
 }

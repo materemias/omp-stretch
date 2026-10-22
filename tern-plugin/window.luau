@@ -39,6 +39,16 @@ tern.css(
 	text-decoration: none;
 	opacity: 0.75;
 }
+.md a[href*="cc-stretch.invalid/"][href*="/deepen/"],
+.sf-chat-console .sf-md .md a[href*="cc-stretch.invalid/"][href*="/deepen/"],
+.sf-chat-reader [data-role^='omp.assistant'] > .sf-md .md a[href*="cc-stretch.invalid/"][href*="/deepen/"],
+.md a[href*="cc-stretch.invalid/"][href*="/deepen/"]:hover,
+.sf-chat-console .sf-md .md a[href*="cc-stretch.invalid/"][href*="/deepen/"]:hover,
+.sf-chat-reader [data-role^='omp.assistant'] > .sf-md .md a[href*="cc-stretch.invalid/"][href*="/deepen/"]:hover {
+	box-shadow: none;
+	text-decoration: none;
+	font-weight: bold;
+}
 ]]
 )
 

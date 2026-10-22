@@ -107,8 +107,9 @@ async function glide(x: number, y: number, ms = 350) {
 
 type Link = { text: string; rect: [number, number, number, number] };
 async function link(pick: (links: Link[]) => Link | undefined, what: string): Promise<Link> {
-  const found = pick((await ctl("tree", "a")).nodes as Link[]);
-  if (!found) throw new Error(`no link ${what} on screen`);
+  const links = (await ctl("tree", "a")).nodes as Link[];
+  const found = pick(links);
+  if (!found) throw new Error(`no link ${what} on screen; links: ${JSON.stringify(links.map((l) => l.text))}`);
   return found;
 }
 const startingWith = (text: string) => (links: Link[]) => links.find((l) => l.text.startsWith(text));
@@ -163,6 +164,13 @@ try {
   caption("Click « and it shrinks back.");
   await press(await link((ls) => ls.find((l) => l.text.trim() === "«"), "« for stretch 1"));
   await sleep(1100);
+
+  // Stretch 1 is closed now, so the only ✦ left ends the nested stretch.
+  caption("Click the star for more. The model writes it in place.");
+  await press(await link((ls) => ls.find((l) => l.text.trim() === "✦"), "✦ after the nested stretch"));
+  await sleep(4500);
+  await press(await link(startingWith("one changed commit"), "for the stretch in the ✦ answer"));
+  await sleep(1500);
 
   caption("/stretch light keeps a sentence or two in view.");
   await glide(SIZE[0] * 0.62, SIZE[1] * 0.72, 250);

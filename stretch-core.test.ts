@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { guideFor, linkedMarkdown, type LinkView, parse, promptTransition, readNote, streamingView, stretches, writeOpen } from "./stretch-core.ts";
+import { guideFor, linkedMarkdown, type LinkView, parse, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
 
 const closed: LinkView = { href: (op, index) => `u/${op}/${index}`, isOpen: () => false };
 
@@ -77,7 +77,7 @@ describe("linkedMarkdown", () => {
 
   test("a growing stretch starts at its short form's words and ends at its long form", () => {
     const parts = parse("{{fails on cache.|The CI build fails often on a stale cache.}}");
-    const at = (progress: number) => linkedMarkdown(parts, { ...closed, isOpen: () => true, growing: { index: 0, progress } });
+    const at = (progress: number) => linkedMarkdown(parts, { ...closed, isOpen: () => true, growing: { key: "fails on cache.", progress } });
     expect(at(0)).toBe("fails on cache. [«](u/close/0)");
     expect(at(1)).toBe("The CI build fails often on a stale cache. [«](u/close/0)");
   });
@@ -156,5 +156,71 @@ describe("promptTransition", () => {
     expect(result.content).toBe(
       `Stretchtext is now light: at its shortest, a sentence or two per paragraph or list item. ${readNote(written, opened)}`,
     );
+  });
+});
+
+describe("deepen", () => {
+  const allOpen: LinkView = { href: (op, index) => `u/${op}/${index}`, isOpen: () => true, deepen: { progress: () => undefined } };
+  const pressed = (elapsedMs: number, partial: string): LinkView => ({
+    ...allOpen,
+    deepen: { progress: key => (key === "a" ? { elapsedMs, partial } : undefined) },
+  });
+
+  test("a fully open stretch gets ✦ before its «, once everything inside it is open too", () => {
+    const parts = parse("{{a|a {{b|b x}} y}}");
+    expect(linkedMarkdown(parts, allOpen)).toBe("a b x [✦](u/deepen/1) [«](u/close/1) y [✦](u/deepen/0) [«](u/close/0)");
+    const bClosed = { ...allOpen, isOpen: (key: string) => key === "a" };
+    expect(linkedMarkdown(parts, bClosed)).toBe("a [b](u/open/1) y [«](u/close/0)");
+  });
+
+  test("stretches ending on the same word share the innermost «", () => {
+    const parts = parse("{{a|a {{b|b {{c|c x}}}}}} and {{d|d y}}");
+    expect(linkedMarkdown(parts, allOpen)).toBe("a b c x [✦](u/deepen/2) [«](u/close/2) and d y [✦](u/deepen/3) [«](u/close/3)");
+    // With c closed, b ends on c's link, not on a «: b gets its own, and a shares it.
+    const cClosed = { ...allOpen, isOpen: (key: string) => key !== "a › b › c" };
+    expect(linkedMarkdown(parts, cClosed)).toBe("a b [c](u/open/2) [«](u/close/1) and d y [✦](u/deepen/3) [«](u/close/3)");
+  });
+
+  test("a running press twinkles with its seconds until words arrive, then streams them in place", () => {
+    const parts = parse("{{a|a long}}");
+    expect(linkedMarkdown(parts, pressed(0, ""))).toBe("a long ✧ 0s [«](u/close/0)");
+    expect(linkedMarkdown(parts, pressed(3_400, ""))).toBe("a long ✷ 3s [«](u/close/0)");
+    // Stretches show only their short forms while streaming, as in a streaming reply: no half-written long form.
+    expect(linkedMarkdown(parts, pressed(5_000, "✦ More {{b|b detail}} and {{c|c "))).toBe(
+      "a long ✦ More b and c ✷ [«](u/close/0)",
+    );
+  });
+
+  test("an answer goes in last inside its stretch, so earlier keys stay, and answers to answers nest", () => {
+    const text = "{{a|a {{b|b x}} y}} and {{c|c z}}";
+    const once = withAnswers(text, [{ key: "a › b", text: "more" }]);
+    expect(once).toBe("{{a|a {{b|b x {{✦|✦ more}}}} y}} and {{c|c z}}");
+    const twice = withAnswers(text, [{ key: "a › b › ✦", text: "deeper" }, { key: "a › b", text: "more" }]);
+    expect(stretches(parse(twice)).map(s => s.key)).toEqual(["a", "a › b", "a › b › ✦", "a › b › ✦ › ✦", "c"]);
+    expect(writeOpen(parse(twice))).toBe("a b x ✦ more ✦ deeper y and c z");
+  });
+
+  test("an answer after a long form ending in a code fence starts its own paragraph", () => {
+    const text = withAnswers("{{Run.|Run:\n```sh\nmake\n```}} after", [{ key: "Run.", text: "more" }]);
+    expect(writeOpen(parse(text))).toBe("Run:\n```sh\nmake\n```\n\n✦ more after");
+  });
+
+  test("an answer that would not stay inside its own stretch is refused", () => {
+    const block = "{{p|p long}} tail `later` {{q|q z}}";
+    const ok = spliceAnswer(block, [], "p", "  ✦ More {{x|x y}}.  ");
+    expect(ok && { text: ok.text, key: ok.key, nested: ok.nested.map(s => s.key) }).toEqual({
+      text: "More {{x|x y}}.",
+      key: "p › ✦",
+      nested: ["p › ✦ › x"],
+    });
+    // A stray }}, an unclosed fence, a lone backtick pairing with the later code span, broken or empty.
+    for (const reply of ["see a}} b", "x\n```sh\nmake", "a ` b", "More {{x|x y", "   "]) {
+      expect(spliceAnswer(block, [], "p", reply)).toBeUndefined();
+    }
+  });
+
+  test("✦ waits until its stretch has grown open", () => {
+    const view = { ...allOpen, growing: { key: "a", progress: 0.5 } };
+    expect(linkedMarkdown(parse("{{a|a long}}"), view)).not.toContain("deepen");
   });
 });
