@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-22)
 
 - ✦ deepen control: a stretch that is open, with every stretch inside it open too, ends in `✦ «` (stretches ending on the same word share one). A press asks the model for more on that section in a side turn (`runEphemeralTurn`) over the whole conversation, without adding it to the transcript. The answer streams in where it will stay, then becomes a new open `✦` stretch that can hold stretches of its own and be deepened again.
 - While a press waits, the ✦ twinkles with a seconds count until the first words arrive. ✦ appears only after its stretch has finished growing. A running press redraws its reply once a second instead of ten times, to make it less likely that a redraw replaces a link while it is being clicked.

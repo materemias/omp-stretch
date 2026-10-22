@@ -8,7 +8,7 @@
 			"name": "omp-stretch",
 			"source": "./",
 			"description": "Stretchtext replies for omp in Tern: read each reply's gist, click a phrase to grow its detail in place",
-			"version": "0.1.0"
+			"version": "0.2.0"
 		}
 	]
 }

@@ -34,7 +34,7 @@ A press is a model call. It reuses the conversation's prompt cache and is capped
 
 ## On your phone
 
-[tern-awui](https://github.com/materemias/tern-awui), the phone and browser companion for omp in Tern, shows the same stretches as links. Open one on the phone and it opens in the Tern pane too, and the reverse. The model's read note counts what you opened on either side. Each app works without the other.
+[tern-awui](https://github.com/materemias/tern-awui), the phone and browser companion for omp in Tern, shows the same stretches as links. Open one on the phone and it opens in the Tern pane too, and the reverse; ✦ works from the phone as well, with the pane's model. The model's read note counts what you opened on either side. Each app works without the other.
 
 ## Limits
 
@@ -43,6 +43,5 @@ A press is a model call. It reuses the conversation's prompt cache and is capped
 - `/btw` answers come plain, since that panel can't open stretches.
 - A literal placeholder without a pipe, such as `{{name}}`, stays unchanged. Put template expressions containing pipes in code spans so they are not mistaken for stretches.
 - omp's "Copy answer" copies the reply as drawn: closed stretches stay short, and their links only work in this omp.
-- tern-awui doesn't show ✦ answers yet, and ✦ can only be pressed in the Tern pane.
 
 MIT. The parser, the growth logic and the guide are ported from cc-stretch (MIT).
