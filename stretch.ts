@@ -486,7 +486,7 @@ function watchClicks(): void {
   }
 }
 
-/** The mode `/stretch` last chose, for every omp process: `{ "mode": "off" | "light" | "dense" }`. */
+/** The mode `/stretch` last chose, for every omp process: `{ "mode": "off" | "light" | "dense" | "section" }`. */
 const MODE_FILE = join(homedir(), ".omp", "agent", "stretch.json");
 
 function readSavedMode(): Mode | undefined {
@@ -498,7 +498,7 @@ function readSavedMode(): Mode | undefined {
   }
   if (!saved || typeof saved !== "object" || !("mode" in saved)) return undefined;
   const mode = saved.mode;
-  return mode === "off" || mode === "light" || mode === "dense" ? mode : undefined;
+  return isMode(mode) ? mode : undefined;
 }
 
 /** Written whole and renamed into place, so a process reading it never sees half a file. */
@@ -511,8 +511,11 @@ function saveMode(mode: Mode): void {
 const MODE_CHOICES: { value: Mode; description: string }[] = [
   { value: "dense", description: "Default: only each paragraph's gist in view, stretches used heavily" },
   { value: "light", description: "A sentence or two per paragraph in view, stretches used sparingly" },
+  { value: "section", description: "Experimental: one line per section under a heading, dense inside" },
   { value: "off", description: "Plain replies, no stretches" },
 ];
+
+const isMode = (value: unknown): value is Mode => MODE_CHOICES.some(choice => choice.value === value);
 
 /** What `/stretch status` reports: this process's mode, the saved one, and what actually draws and clicks. */
 function statusText(): string {
@@ -561,7 +564,7 @@ export default function stretch(pi: ExtensionAPI): void {
   };
 
   pi.registerCommand("stretch", {
-    description: "Stretchtext replies for every omp session: /stretch dense | light | off | status",
+    description: "Stretchtext replies for every omp session: /stretch dense | light | section | off | status",
     getArgumentCompletions: prefix => {
       const typed = prefix.trim().toLowerCase();
       const modes = MODE_CHOICES.filter(choice => choice.value.startsWith(typed)).map(choice => ({
@@ -574,7 +577,7 @@ export default function stretch(pi: ExtensionAPI): void {
     },
     handler: (args, ctx) => {
       const arg = args.trim().toLowerCase();
-      if (arg === "off" || arg === "light" || arg === "dense") {
+      if (isMode(arg)) {
         // Saved first: the next prompt syncs every process to the saved mode, this one included.
         try {
           saveMode(arg);
@@ -587,7 +590,7 @@ export default function stretch(pi: ExtensionAPI): void {
         ctx.ui.notify(statusText(), "info");
         return;
       } else if (arg !== "") {
-        ctx.ui.notify("Usage: /stretch dense | light | off | status", "warning");
+        ctx.ui.notify("Usage: /stretch dense | light | section | off | status", "warning");
         return;
       }
       const where = CLICKABLE ? "" : " (outside Tern stretches are always drawn open and never requested)";

@@ -44,6 +44,29 @@ describe("parse", () => {
     expect(writeOpen(parse("A {{short|long {{name}} and {{nested|nested detail}}}}.")))
       .toBe("A long {{name}} and nested detail.");
   });
+
+  test("a gist written before its own stretch as well shows once", () => {
+    expect(linkedMarkdown(parse("- **AMD is out.** {{AMD is out.|AMD is out: its data starts in 2021.}}"), closed)).toBe(
+      "- [AMD is out.](u/open/0)",
+    );
+    expect(writeOpen(parse("Checks pass. Checks pass. {{Checks pass.|Checks pass, all 9.}}"))).toBe(
+      "Checks pass. Checks pass, all 9.",
+    );
+    // Mid-sentence words that happen to match the short form stay.
+    expect(linkedMarkdown(parse("on a stale cache {{cache|cache keyed by hash}}"), closed)).toBe(
+      "on a stale cache [cache](u/open/0)",
+    );
+    // The line started before an earlier stretch, so " cache " is mid-sentence too.
+    expect(linkedMarkdown(parse("{{Use|Use it}} cache {{cache|cache keyed by hash}}"), closed)).toBe(
+      "[Use](u/open/0) cache [cache](u/open/1)",
+    );
+    // Code is never cut.
+    expect(linkedMarkdown(parse("`let x = 1; x` {{x|x is returned}}"), closed)).toBe("`let x = 1; x` [x](u/open/0)");
+    // Bold that opens before the copy and closes after the stretch keeps both marks.
+    expect(writeOpen(parse("**Checks pass. {{Checks pass.|Checks pass in CI.}}**"))).toBe(
+      "**Checks pass. Checks pass in CI.**",
+    );
+  });
 });
 
 describe("streamingView", () => {
@@ -122,8 +145,9 @@ describe("promptTransition", () => {
   const written = [{ id: "1", short: "cache" }];
   const opened = new Set(["1"]);
 
-  test("swaps dense and light guides and announces the new level", () => {
-    for (const [before, after] of [["dense", "light"], ["light", "dense"]] as const) {
+  test("swaps guides between levels and announces the new level", () => {
+    const pairs = [["dense", "light"], ["light", "dense"], ["dense", "section"], ["section", "light"]] as const;
+    for (const [before, after] of pairs) {
       const result = promptTransition(["base", guideFor(before)], after, after, [], opened);
       expect(result.systemPrompt).toEqual(["base", guideFor(after)]);
       expect(result.content).toStartWith(`Stretchtext is now ${after}:`);

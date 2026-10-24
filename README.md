@@ -18,13 +18,19 @@ tern plugin link ~/.omp/plugins/node_modules/omp-stretch/tern-plugin
 
 Restart omp; `/stretch status` confirms it loaded. Needs omp 18.11.0 or newer. Outside Tern, stretches show fully open; inside Tern, the Tern plugin is required to open them.
 
+If you use omp's advisor, add this line to `~/.omp/agent/WATCHDOG.md` so it knows the `{{short|long}}` markup is the reply format and doesn't ask the agent to remove it:
+
+```
+@~/.omp/plugins/node_modules/omp-stretch/advisor.md
+```
+
 To update, run `omp plugin upgrade omp-stretch@omp-stretch`, then the `tern plugin link` line again: Tern remembers the versioned folder the link pointed to.
 
 ## Benefits
 
 You read about 40% fewer words before clicking anything: 157 words per reply against 263 before, across my recent sessions. The detail is one click away, and details can hold further details. The cost is about 0.3% of a session's cost: the model writes every level up front, so you read less, but you don't pay less.
 
-`/stretch dense` (default) shows the gist, `/stretch light` keeps a sentence or two in view, and `/stretch off` turns stretches off. The choice applies to every omp session. `/stretch status` shows what's actually in effect.
+`/stretch dense` (default) shows the gist, `/stretch light` keeps a sentence or two in view, and `/stretch off` turns stretches off. `/stretch section` (experimental) folds each section under a heading into one line; opening it shows that section in dense form. The choice applies to every omp session. `/stretch status` shows what's actually in effect.
 
 ## Ask for more
 
