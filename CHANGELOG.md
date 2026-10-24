@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 (2026-10-24)
+
+- A gist written twice, once before its stretch (often as a bold lead-in) and again as the stretch's short form, now shows once: the copy in front is dropped. Only a copy that starts its line or a sentence counts, so matching words mid-sentence stay. The prompt now tells the model to write each short form only once, inside its stretch.
+- The guide ends with a short example reply: a paragraph and two labelled list items, each gist written once, and the question to the reader outside every stretch.
+- Experimental `/stretch section` mode: each section under a heading shows one line, its finding, and opening it shows the section in dense form, each paragraph and list item a gist of its own. Text outside sections, and replies without headings, are written as in dense. Saved like the other modes.
+- `advisor.md`: guidance for omp's advisor, imported from `~/.omp/agent/WATCHDOG.md` (see README). Without it the advisor sees raw `{{short|long}}` markup, calls it duplicated text and asks for plain Markdown.
+
 ## 0.2.0 (2026-10-22)
 
 - ✦ deepen control: a stretch that is open, with every stretch inside it open too, ends in `✦ «` (stretches ending on the same word share one). A press asks the model for more on that section in a side turn (`runEphemeralTurn`) over the whole conversation, without adding it to the transcript. The answer streams in where it will stay, then becomes a new open `✦` stretch that can hold stretches of its own and be deepened again.
