@@ -41,8 +41,8 @@ describe("parse", () => {
   });
 
   test("fully open fallback expands valid stretches and preserves nested placeholders", () => {
-    expect(writeOpen(parse("A {{short|long {{name}} and {{nested|nested detail}}}}.")))
-      .toBe("A long {{name}} and nested detail.");
+    expect(writeOpen(parse("A {{short|short long {{name}} and {{nested|nested detail}}}}.")))
+      .toBe("A short long {{name}} and nested detail.");
   });
 
   test("a gist written before its own stretch as well shows once", () => {
@@ -66,6 +66,23 @@ describe("parse", () => {
     expect(writeOpen(parse("**Checks pass. {{Checks pass.|Checks pass in CI.}}**"))).toBe(
       "**Checks pass. Checks pass in CI.**",
     );
+  });
+
+  test("a long form that rewrites its short form keeps it in front, so both ideas show open", () => {
+    const text = "- Rule: {{I added it to CLAUDE.md.|It covers commit types and changelog headings.}}";
+    expect(writeOpen(parse(text))).toBe("- Rule: I added it to CLAUDE.md. It covers commit types and changelog headings.");
+    expect(linkedMarkdown(parse(text), closed)).toBe("- Rule: [I added it to CLAUDE.md.](u/open/0)");
+    // Most words kept, reworded or reordered: nothing is added.
+    expect(writeOpen(parse("{{The build fails on a stale cache.|The CI build breaks on a stale dependency cache.}}")))
+      .toBe("The CI build breaks on a stale dependency cache.");
+    // A long form opening a list goes below the short form.
+    expect(writeOpen(parse("{{Three steps.|- a\n- b}}"))).toBe("Three steps.\n\n- a\n- b");
+  });
+
+  test("a stretch with an empty long form is plain text and frees its key", () => {
+    const parts = parse("- Current: {{every change gets an entry.|}} {{a| }} and {{a|a b}}");
+    expect(linkedMarkdown(parts, closed)).toBe("- Current: every change gets an entry. a and [a](u/open/0)");
+    expect(stretches(parts).map(s => s.key)).toEqual(["a"]);
   });
 });
 

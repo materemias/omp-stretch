@@ -141,10 +141,21 @@ export function parse(text: string): Segment[] {
       continue;
     }
     if (frame && text.startsWith("}}", i)) {
-      frame.stretch.isClosed = true;
-      frame.stretch.end = i;
+      const { stretch } = frame;
       stack.pop();
       i += 2;
+      // An empty long form has nothing to open: its short form is plain text, and its key is free again.
+      if (stretch.long?.every(part => typeof part === "string" && part.trim() === "")) {
+        const parent = stack.at(-1);
+        (parent?.stretch.long ?? root).pop();
+        (parent?.siblings ?? rootSiblings).delete(parent ? stretch.key.slice(parent.stretch.key.length + KEY_SEPARATOR.length) : stretch.key);
+        write(stretch.short);
+        continue;
+      }
+      stretch.isClosed = true;
+      stretch.end = i - 2;
+      // A multi-line short form is never shown (only linkable stretches are), so its long form stands alone.
+      if (stretch.long !== undefined && !stretch.short.includes("\n")) keepShort(stretch.short, stretch.long);
       continue;
     }
     write(text[i] ?? "");
@@ -164,7 +175,7 @@ export function parse(text: string): Segment[] {
 function dropRepeat(segments: Segment[], short: string, isRoot: boolean): void {
   const before = segments.at(-2);
   if (typeof before !== "string") return;
-  const want = short.split(/\s+/).map(bare).filter(word => word !== "");
+  const want = wordsOf(short);
   if (want.length === 0) return;
   const lineStart = before.lastIndexOf("\n") + 1;
   if (lineStart === 0 && !(isRoot && segments.length === 2)) return;
@@ -185,6 +196,27 @@ function dropRepeat(segments: Segment[], short: string, isRoot: boolean): void {
   const lead = before.slice(lineStart, cut).trim();
   if (lead !== "" && !/^([-*+>]|\d+[.)]|#+)$/.test(lead) && !/[.!?:;]$/.test(lead)) return;
   segments[segments.length - 2] = before.slice(0, cut);
+}
+
+/** A long form that starts a block (list, quote, heading, fence) goes below a prepended short form, not after it on its line. */
+const BLOCK_START = /^(?:[-*+>][ \t]|\d+[.)][ \t]|#{1,6}[ \t]|`{3,}|~{3,})/;
+
+/**
+ * A long form that drops the short form's idea, carrying fewer than half its words in order, starts
+ * with the short form, so opening it adds to what the reader saw instead of replacing it.
+ */
+function keepShort(short: string, long: Segment[]): void {
+  const want = wordsOf(short);
+  if (want.length === 0) return;
+  const have = wordsIn(tokenize(long)).map(entry => entry.word);
+  if (2 * commonLengths(want, have)[0]![0]! >= want.length) return;
+  const first = long[0];
+  if (typeof first !== "string") {
+    long.unshift(first === undefined ? short.trim() : `${short.trim()} `);
+    return;
+  }
+  const gap = /^\s/.test(first) ? "" : BLOCK_START.test(first) ? "\n\n" : " ";
+  long[0] = `${short.trim()}${gap}${first}`;
 }
 
 /**
@@ -326,24 +358,40 @@ function tokenize(long: Segment[]): Token[] {
   );
 }
 
-/** Token indexes of the long form carrying the short form's words, in order (longest common subsequence). */
-function anchorsOf(short: string, tokens: Token[]): Set<number> {
-  const want = short.split(/\s+/).map(bare).filter(word => word !== "");
+/** The short form's words, bare. */
+function wordsOf(short: string): string[] {
+  return short.split(/\s+/).map(bare).filter(word => word !== "");
+}
+
+/** The long form's words, bare, each with the token carrying it (a nested stretch carries its short form's). */
+function wordsIn(tokens: Token[]): { token: number; word: string }[] {
   const have: { token: number; word: string }[] = [];
   tokens.forEach((token, i) => {
     const words =
       token.kind === "word" ? [token.text] : token.kind === "nested" ? token.stretch.short.split(/\s+/) : [];
     for (const word of words.map(bare).filter(w => w !== "")) have.push({ token: i, word });
   });
+  return have;
+}
 
+/** `[i][j]`: longest common subsequence of `want` from `i` and `have` from `j`. */
+function commonLengths(want: string[], have: string[]): number[][] {
   const lengths = Array.from({ length: want.length + 1 }, () => new Array<number>(have.length + 1).fill(0));
   for (let i = want.length - 1; i >= 0; i--) {
     for (let j = have.length - 1; j >= 0; j--) {
       const row = lengths[i]!;
       const below = lengths[i + 1]!;
-      row[j] = want[i] === have[j]?.word ? below[j + 1]! + 1 : Math.max(below[j]!, row[j + 1]!);
+      row[j] = want[i] === have[j] ? below[j + 1]! + 1 : Math.max(below[j]!, row[j + 1]!);
     }
   }
+  return lengths;
+}
+
+/** Token indexes of the long form carrying the short form's words, in order (longest common subsequence). */
+function anchorsOf(short: string, tokens: Token[]): Set<number> {
+  const want = wordsOf(short);
+  const have = wordsIn(tokens);
+  const lengths = commonLengths(want, have.map(entry => entry.word));
   const anchors = new Set<number>();
   for (let i = 0, j = 0; i < want.length && j < have.length; ) {
     if (want[i] === have[j]?.word) {
