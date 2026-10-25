@@ -1,6 +1,6 @@
 {
 	"name": "omp-stretch",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "Stretchtext replies for omp in Tern: read each reply's gist, click a phrase to grow its detail in place",
 	"type": "module",
 	"omp": {
