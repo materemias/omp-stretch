@@ -18,6 +18,12 @@ tern plugin link ~/.omp/plugins/node_modules/omp-stretch/tern-plugin
 
 Restart omp; `/stretch status` confirms it loaded. Needs omp 18.11.0 or newer. Outside Tern, stretches show fully open; inside Tern, the Tern plugin is required to open them.
 
+Using omp on another machine through Tern remoting? Install the Tern plugin on both: on the machine running omp as above, and on the one whose Tern window you click in. The window side needs no omp:
+
+```sh
+tern plugin install github.com/materemias/omp-stretch/tern-plugin
+```
+
 If you use omp's advisor, add this line to `~/.omp/agent/WATCHDOG.md` so it knows the `{{short|long}}` markup is the reply format and doesn't ask the agent to remove it:
 
 ```

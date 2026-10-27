@@ -4,4 +4,12 @@ name = "omp stretch"
 version = "0.3.1"
 description = "Routes clicks on omp stretchtext links (cc-stretch.invalid) to the omp process that drew them"
 icon = "link"
+host = "host.luau"
 window = "window.luau"
+
+# Opened by window.luau on a remote host; ends as soon as it has passed the click on.
+[[blocks]]
+id = "click"
+title = "omp stretch click"
+icon = "link"
+palette = false

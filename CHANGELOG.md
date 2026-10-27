@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- Stretches open and close from a Tern window connected to omp's machine through Tern remoting, instead of opening a browser tab. The Tern plugin must be installed on both machines.
+
 ## 0.3.1 (2026-10-25)
 
 ### Fixes

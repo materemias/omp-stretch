@@ -1,7 +1,8 @@
 --!strict
 -- Clicks on stretchtext links in omp replies (stretch.ts) never open a browser: each is dropped as a
 -- file into the click directory of the omp process named in the URL, which grows or shrinks the
--- stretch in place. A link of a process that has exited is swallowed.
+-- stretch in place. A link of a process that has exited is swallowed. When the clicked pane lives on a
+-- remote host, the omp process's folder is on that machine: the plugin's host half there writes it.
 --
 -- URL: https://cc-stretch.invalid/<pid>/<open|close>/<timestamp>/<block>/<index>
 
@@ -52,10 +53,15 @@ tern.css(
 ]]
 )
 
-tern.route.link(function(link: LinkRequest, _cx: WindowCx): RouteDecision?
+tern.route.link(function(link: LinkRequest, cx: WindowCx): RouteDecision?
 	local pid, action = string.match(link.url, "^https://cc%-stretch%.invalid/(%d+)/(.+)$")
 	if pid == nil or action == nil then
 		return nil
+	end
+	-- The window's machine is not the omp process's when the clicked pane lives on a remote host; the
+	-- host half's `click` block, opened there, writes the file instead (host.luau).
+	if cx.hosts:current().kind == "remote" then
+		return { block = "omp-stretch.click", args = { pid, action } }
 	end
 	-- Same folder as stretch.ts: $XDG_RUNTIME_DIR/omp-stretch, else one per user in /tmp.
 	local runtime = tern.getenv("XDG_RUNTIME_DIR")
