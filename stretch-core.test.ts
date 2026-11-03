@@ -227,6 +227,13 @@ describe("promptTransition", () => {
       `Stretchtext is now light: at its shortest, a sentence or two per paragraph or list item. ${readNote(written, opened)}`,
     );
   });
+
+  test("the section guide's worked example has one closed stretch per section", () => {
+    const example = guideFor("section").split("An example reply:\n\n")[1]!.split("\n\nWith each")[0]!;
+    const outer = parse(example).filter(part => typeof part !== "string");
+    expect(outer.map(s => s.short)).toEqual(["CI fails on a stale cache.", "Key the cache on the lockfile too."]);
+    expect(stretches(parse(example)).every(s => s.isClosed)).toBe(true);
+  });
 });
 
 describe("deepen", () => {

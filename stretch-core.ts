@@ -22,8 +22,33 @@ const SHORTEST: Record<Level, string> = {
 };
 
 export function guideFor(level: Level): string {
-  return GUIDE_TEMPLATE.replace("{{shortest}}", SHORTEST[level]);
+  return GUIDE_TEMPLATE.replace("{{shortest}}", () => SHORTEST[level]).replace("{{example}}", () =>
+    level === "section" ? SECTION_EXAMPLE : PARAGRAPH_EXAMPLE,
+  );
 }
+
+const PARAGRAPH_EXAMPLE = `{{CI fails on a stale cache.|CI fails, about one run in five, on a stale cache keyed only by \`package.json\`.}}
+
+- **Fix:** {{key it on the lockfile too.|key it on the lockfile, \`bun.lock\`, too, so a dependency bump misses the cache.}}
+- **Cost:** {{one cold build per bump.|one cold build, about four minutes, per dependency bump.}}
+
+Should I make the change?`;
+
+// A worked example of the section rule: one stretch per section, paragraph stretches inside it.
+const SECTION_EXAMPLE = `## Cause
+
+{{CI fails on a stale cache.|{{CI fails on a stale cache.|CI fails, about one run in five, on a stale cache keyed only by \`package.json\`.}}
+
+{{Dependency bumps keep the old key.|Dependency bumps change \`bun.lock\` but keep the old key, so a restore brings back old modules.}}}}
+
+## Fix
+
+{{Key the cache on the lockfile too.|Key the cache on the lockfile too:
+
+- **Change:** {{add \`bun.lock\` to the key.|add \`bun.lock\` to the key, next to \`package.json\`.}}
+- **Cost:** {{one cold build per bump.|one cold build, about four minutes, per dependency bump.}}}}
+
+Should I make the change?`;
 
 const GUIDE_TEMPLATE = `# Stretchtext replies
 
@@ -43,12 +68,7 @@ The reader's screen draws each stretch \`{{short|long}}\` in your reply as its s
 
 An example reply:
 
-{{CI fails on a stale cache.|CI fails, about one run in five, on a stale cache keyed only by \`package.json\`.}}
-
-- **Fix:** {{key it on the lockfile too.|key it on the lockfile, \`bun.lock\`, too, so a dependency bump misses the cache.}}
-- **Cost:** {{one cold build per bump.|one cold build, about four minutes, per dependency bump.}}
-
-Should I make the change?
+{{example}}
 
 With each of the reader's messages you are told which stretches they opened. Do not assume they read a long form they did not open; if it matters to what they asked, say it again.`;
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+- `/stretch section` shows the model a worked example with one stretch per section.
+
 ### Fixes
 
 - A stretch whose short form is only punctuation such as a period, or empty, opens from the words of its sentence before it, and the read note names it by them. With no such words, it shows open.
