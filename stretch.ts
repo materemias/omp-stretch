@@ -33,6 +33,7 @@ import {
   spliceAnswer,
   TWINKLE_MS,
   isLinkable,
+  isPlainReply,
   KEY_SEPARATOR,
   lengthOf,
   type Mode,
@@ -187,6 +188,15 @@ function spliced(id: BlockId, text: string): string {
 }
 
 const hasMarkup = (content: Content) => content.some(block => block.type === "text" && block.text.includes("{{"));
+
+/**
+ * `isPlainReply` for a finished reply. A tool-call step, or a reply cut off by an abort, an error or
+ * the token cap, says nothing about whether the model still writes stretches.
+ */
+function plainVerdict(message: Pick<AssistantMessage, "stopReason" | "content">): boolean | undefined {
+  if (message.stopReason !== "stop") return undefined;
+  return isPlainReply(message.content.flatMap(block => (block.type === "text" ? [block.text] : [])).join("\n\n"));
+}
 
 /** The whole reply `segment` is part of; `segment` itself when the reply cannot be found. */
 function wholeReply(segment: AssistantMessage): AssistantMessage {
@@ -545,6 +555,8 @@ export default function stretch(pi: ExtensionAPI): void {
   shared.wrote = written => pending.push(...written);
   /** Set by `/stretch` when the mode changes, until the next prompt tells the model. */
   let switched: Mode | undefined;
+  /** The main session's last long reply had no stretches: the next prompt reminds the model once. */
+  let lastPlain = false;
   const isMainTui = (ctx: { mode: string; agent: { kind: string } }) =>
     CLICKABLE && ctx.mode === "tui" && ctx.agent.kind === "main";
   const active = (ctx: { mode: string; agent: { kind: string } }) => isMainTui(ctx) && shared.mode !== "off";
@@ -633,8 +645,17 @@ export default function stretch(pi: ExtensionAPI): void {
     // after the branch's last note that reported answers were never reported: the next note does.
     answers.clear();
     shared.deepened.length = 0;
-    type Entry = { type?: string; customType?: string; content?: unknown; data?: unknown };
+    lastPlain = false;
+    type Entry = { type?: string; customType?: string; content?: unknown; data?: unknown; message?: { role?: string; content?: unknown } };
     for (const entry of ctx.sessionManager.getBranch() as Entry[]) {
+      if (entry.type === "message") {
+        // As live: a prompt carries any reminder, and the replies after it decide the next one.
+        if (entry.message?.role === "user") lastPlain = false;
+        if (entry.message?.role === "assistant" && Array.isArray(entry.message.content)) {
+          lastPlain = plainVerdict(entry.message as AssistantMessage) ?? lastPlain;
+        }
+        continue;
+      }
       if (entry.type === "custom_message" && entry.customType === NOTE_TYPE) {
         if (typeof entry.content === "string" && entry.content.includes(DEEPEN_REPORTED)) shared.deepened.length = 0;
         continue;
@@ -679,7 +700,9 @@ export default function stretch(pi: ExtensionAPI): void {
   });
 
   pi.on("message_end", (event, ctx) => {
-    if (event.message.role !== "assistant" || !hasMarkup(event.message.content)) return;
+    if (event.message.role !== "assistant") return;
+    if (isMainTui(ctx)) lastPlain = plainVerdict(event.message) ?? lastPlain;
+    if (!hasMarkup(event.message.content)) return;
     const message = event.message;
     replies.set(message.timestamp, message);
     // A segment drawn before the reply ended numbered its blocks on its own: number them in the reply.
@@ -705,10 +728,11 @@ export default function stretch(pi: ExtensionAPI): void {
     const told = switched;
     switched = undefined;
     const mode = modeOf();
-    const transition = promptTransition(event.systemPrompt, mode, told, pending, seen);
+    const transition = promptTransition(event.systemPrompt, mode, told, pending, seen, lastPlain);
     const added = mode === "off" ? undefined : deepenNote(shared.deepened.splice(0));
     const content = [transition.content, added].filter(text => text !== undefined).join(" ") || undefined;
     if (mode !== "off") {
+      lastPlain = false;
       pending = [];
       // The note just reported every opening that counts; later ones belong to replies still to come.
       seen.clear();

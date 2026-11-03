@@ -38,6 +38,8 @@ You read about 40% fewer words before clicking anything: 157 words per reply aga
 
 `/stretch dense` (default) shows the gist, `/stretch light` keeps a sentence or two in view, and `/stretch off` turns stretches off. `/stretch section` (experimental) folds each section under a heading into one line; opening it shows that section in dense form. The choice applies to every omp session. `/stretch status` shows what's actually in effect.
 
+Deep in a long session the model tends to stop writing stretches, and one plain reply tends to be followed by more. So when a reply comes back with 800 or more characters of prose (code blocks aside) and no stretches, your next message carries a one-line reminder, about 30 tokens.
+
 ## Ask for more
 
 When a stretch and every stretch inside it are open, it ends in `✦ «`. Click ✦ and the model writes what comes next in that section, right there, as another stretch you can open further or deepen again. It runs as a side question over the whole conversation, like `/btw`, so the transcript stays as it was; the model hears what it added with your next message. Answers are saved with the session.

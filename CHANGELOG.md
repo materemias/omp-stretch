@@ -4,6 +4,7 @@
 
 ### Features
 
+- After a long reply without stretches, the next message reminds the model to use them. Code blocks don't count toward long.
 - `/stretch section` shows the model a worked example with one stretch per section.
 
 ### Fixes

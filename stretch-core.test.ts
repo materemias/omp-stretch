@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { guideFor, linkedMarkdown, type LinkView, parse, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
+import { guideFor, isPlainReply, linkedMarkdown, type LinkView, parse, PLAIN_REMINDER, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
 
 const closed: LinkView = { href: (op, index) => `u/${op}/${index}`, isOpen: () => false };
 
@@ -226,6 +226,24 @@ describe("promptTransition", () => {
     expect(result.content).toBe(
       `Stretchtext is now light: at its shortest, a sentence or two per paragraph or list item. ${readNote(written, opened)}`,
     );
+  });
+
+  test("reminds the model after a long plain reply, unless a switch note already tells it", () => {
+    const prompt = ["base", guideFor("dense")];
+    expect(promptTransition(prompt, "dense", undefined, [], opened, true).content).toBe(PLAIN_REMINDER);
+    expect(promptTransition(prompt, "dense", undefined, written, opened, true).content).toBe(`${PLAIN_REMINDER} ${readNote(written, opened)}`);
+    expect(promptTransition(prompt, "light", "light", [], opened, true).content).toStartWith("Stretchtext is now light:");
+    expect(promptTransition(prompt, "off", undefined, [], opened, true).content).toBeUndefined();
+  });
+
+  test("a reply is plain when its prose is long with no stretch markup, and says nothing when short", () => {
+    const long = "word ".repeat(200);
+    expect(isPlainReply(long)).toBe(true);
+    expect(isPlainReply(`${long}{{a|a b}}`)).toBe(false);
+    expect(isPlainReply(`${long}{{a|a b`)).toBe(false);
+    expect(isPlainReply(`${long}\`{{a|a b}}\``)).toBe(true);
+    expect(isPlainReply(`Here it is:\n\n\`\`\`sh\n${"echo hi\n".repeat(200)}\`\`\``)).toBeUndefined();
+    expect(isPlainReply("Done.")).toBeUndefined();
   });
 
   test("the section guide's worked example has one closed stretch per section", () => {

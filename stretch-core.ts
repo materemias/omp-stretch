@@ -698,6 +698,30 @@ const SWITCH_NOTE: Record<Level, string> = {
     "Stretchtext is now section: at its shortest, each section under a heading shows one line, its finding; inside it, each paragraph or list item shows only its gist.",
 };
 
+/** Characters of prose past which a reply needs stretches: more than three sentences or so. */
+const LONG_REPLY = 800;
+
+/** A fenced code block, closed by a fence of the same run. */
+const FENCED_BLOCK = /^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm;
+
+/**
+ * Whether a reply's text says the model has stopped writing stretches: long prose with no stretch
+ * markup at all. Undefined for a short plain reply, which says nothing either way. Code is left
+ * out of the length, since stretches never go there.
+ */
+export function isPlainReply(text: string): boolean | undefined {
+  // Any stretch written, even one drawn open or never closed, means the model still writes them.
+  if (text.includes("{{") && stretches(parse(text)).some(s => s.long !== undefined)) return false;
+  return text.replace(FENCED_BLOCK, "").trim().length >= LONG_REPLY ? true : undefined;
+}
+
+/**
+ * Sent while the last long reply had no stretches: deep in a session the guide alone stops carrying,
+ * and one plain reply tends to be followed by more.
+ */
+export const PLAIN_REMINDER =
+  "Stretchtext: your last long reply had no stretches. Use them in any reply longer than three sentences, status reports and summaries included.";
+
 /** Pure prompt edits; the caller owns pending reads and consumes the mode-change notification. */
 export function promptTransition(
   systemPrompt: string[],
@@ -705,6 +729,7 @@ export function promptTransition(
   switched: Mode | undefined,
   written: { id: string; short: string }[],
   opened: ReadonlySet<string>,
+  lastPlain = false,
 ): { systemPrompt: string[] | undefined; content: string | undefined } {
   const others = systemPrompt.filter(part => !ALL_GUIDES.includes(part));
   if (mode === "off") {
@@ -716,10 +741,11 @@ export function promptTransition(
     };
   }
   const guide = guideFor(mode);
-  const note = readNote(written, opened);
+  // A switch note already tells the model how to write from now on.
+  const lead = switched === undefined ? (lastPlain ? PLAIN_REMINDER : undefined) : SWITCH_NOTE[mode];
   const unchanged = systemPrompt.includes(guide) && others.length === systemPrompt.length - 1;
   return {
     systemPrompt: unchanged ? undefined : [...others, guide],
-    content: switched === undefined ? note : `${SWITCH_NOTE[mode]}${note === undefined ? "" : ` ${note}`}`,
+    content: [lead, readNote(written, opened)].filter(text => text !== undefined).join(" ") || undefined,
   };
 }
