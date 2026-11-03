@@ -300,6 +300,13 @@ describe("deepen", () => {
     expect(writeOpen(parse(text))).toBe("Run:\n```sh\nmake\n```\n\n✦ more after");
   });
 
+  test("a second answer to the same stretch goes in after the first and is accepted", () => {
+    const block = "{{a|a long}} rest";
+    const first = [{ key: "a", text: "first" }];
+    expect(writeOpen(parse(withAnswers(block, [...first, { key: "a", text: "second" }])))).toBe("a long ✦ first ✦ second rest");
+    expect(spliceAnswer(block, first, "a", "second")?.key).toBe("a › ✦~2");
+  });
+
   test("an answer that would not stay inside its own stretch is refused", () => {
     const block = "{{p|p long}} tail `later` {{q|q z}}";
     const ok = spliceAnswer(block, [], "p", "  ✦ More {{x|x y}}.  ");

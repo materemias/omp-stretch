@@ -625,13 +625,14 @@ export function withAnswers(text: string, answers: readonly DeepenAnswer[]): str
   let left = [...answers];
   while (left.length > 0) {
     const all = stretches(parse(out));
-    const ready = left.flatMap(answer => {
+    const ready = left.flatMap((answer, index) => {
       const at = all.find(s => s.key === answer.key && isLinkable(s))?.end;
-      return at === undefined ? [] : [{ answer, at }];
+      return at === undefined ? [] : [{ answer, at, index }];
     });
     if (ready.length === 0) break;
-    // Last offset first, so splicing one never moves the next one's offset.
-    for (const { answer, at } of ready.sort((a, b) => b.at - a.at)) {
+    // Last offset first, so splicing one never moves the next one's offset. Answers to the same
+    // stretch share an offset: splice the later one first so the earlier one lands before it.
+    for (const { answer, at } of ready.sort((a, b) => b.at - a.at || b.index - a.index)) {
       const before = out.slice(0, at);
       const lastLine = before.slice(before.lastIndexOf("\n") + 1);
       const gap = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.test(lastLine) ? "\n\n" : /\s$/.test(before) ? "" : " ";
