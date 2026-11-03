@@ -84,6 +84,35 @@ describe("parse", () => {
     expect(linkedMarkdown(parts, closed)).toBe("- Current: every change gets an entry. a and [a](u/open/0)");
     expect(stretches(parts).map(s => s.key)).toEqual(["a"]);
   });
+
+  test("a wordless short form takes on the words of its sentence before it, so they open it", () => {
+    const period = parse("I changed a.ts. It merged 3 days ago{{.|, in #218, after review.}} Next.");
+    expect(linkedMarkdown(period, closed)).toBe("I changed a.ts. [It merged 3 days ago.](u/open/0) Next.");
+    expect(writeOpen(period)).toBe("I changed a.ts. It merged 3 days ago, in #218, after review. Next.");
+    expect(stretches(period).map(s => s.short)).toEqual(["It merged 3 days ago."]);
+    const empty = parse("- **Fix:** Done. {{|The hidden detail.}}");
+    expect(linkedMarkdown(empty, closed)).toBe("- **Fix:** [Done.](u/open/0)");
+    expect(writeOpen(empty)).toBe("- **Fix:** Done. The hidden detail.");
+    expect(writeOpen(parse("Done. {{|- first\n- second}}"))).toBe("Done.\n\n- first\n- second");
+  });
+
+  test("a wordless short form with no words to take on is drawn open, and an empty one stays text", () => {
+    expect(linkedMarkdown(parse("{{|Hidden.}} and - {{.|x}}"), closed)).toBe("Hidden. and - x");
+    expect(linkedMarkdown(parse("Run `make`{{.|, twice.}}"), closed)).toBe("Run `make`, twice.");
+    const plain = parse("It merged{{.|}} ok");
+    expect(linkedMarkdown(plain, closed)).toBe("It merged. ok");
+    expect(stretches(plain)).toHaveLength(0);
+  });
+
+  test("a lead-in keeps one period, leaves symbol short forms alone, and stays out of its parent's words", () => {
+    expect(stretches(parse("Fixed the bug.{{.|x y}} Next")).map(s => s.short)).toEqual(["Fixed the bug."]);
+    expect(linkedMarkdown(parse("See {{→|the details}}."), closed)).toBe("See [→](u/open/0).");
+    const nested = parse("Fixed it{{.|, and also{{.|, more.}}}}");
+    expect(stretches(nested).map(s => s.short)).toEqual(["Fixed it.", "and also."]);
+    expect(writeOpen(nested)).toBe("Fixed it, and also, more.");
+    // Cut off mid-stretch: the long form drawn open still starts with the borrowed words.
+    expect(linkedMarkdown(parse("It merged{{.|, in #218"), closed)).toBe("It merged, in #218");
+  });
 });
 
 describe("streamingView", () => {

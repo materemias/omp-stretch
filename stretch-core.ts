@@ -66,7 +66,8 @@ export type Stretch = {
   end?: number;
 };
 
-type Frame = { stretch: Stretch; siblings: Set<string> };
+/** `lead`: the words before a wordless short form that it took on, and the short form as written. */
+type Frame = { stretch: Stretch; siblings: Set<string>; lead?: { text: string; short: string } };
 
 export const KEY_SEPARATOR = " › ";
 
@@ -74,9 +75,14 @@ export function isOpenable(stretch: Stretch): boolean {
   return stretch.isClosed && stretch.long !== undefined;
 }
 
-/** Openable with a one-line short form: the only stretches the reader can open. */
+/** Openable with a one-line short form that shows something to press: the only stretches the reader can open. */
 export function isLinkable(stretch: Stretch): stretch is Stretch & { long: Segment[] } {
-  return isOpenable(stretch) && !stretch.short.includes("\n");
+  return isOpenable(stretch) && !stretch.short.includes("\n") && !isWordless(stretch.short);
+}
+
+/** A short form of sentence punctuation or nothing (`.`, ``) is too small to press: it takes on the words before it. */
+function isWordless(short: string): boolean {
+  return /^[ \t.!?,;:…]*$/.test(short);
 }
 
 /**
@@ -133,15 +139,19 @@ export function parse(text: string): Segment[] {
       continue;
     }
     if (isInShort && text[i] === "|") {
-      frame.stretch.key = keyOf(frame.stretch.short, stack.at(-2), rootSiblings);
-      frame.stretch.long = [];
       const parent = stack.at(-2);
-      dropRepeat(parent?.stretch.long ?? root, frame.stretch.short, parent === undefined);
+      const container = parent?.stretch.long ?? root;
+      const written = frame.stretch.short;
+      const lead = isWordless(written) ? takeLeadIn(container, frame.stretch) : undefined;
+      if (lead === undefined) dropRepeat(container, written, parent === undefined);
+      else frame.lead = { text: lead, short: written };
+      frame.stretch.key = keyOf(frame.stretch.short, parent, rootSiblings);
+      frame.stretch.long = [];
       i += 1;
       continue;
     }
     if (frame && text.startsWith("}}", i)) {
-      const { stretch } = frame;
+      const { stretch, lead } = frame;
       stack.pop();
       i += 2;
       // An empty long form has nothing to open: its short form is plain text, and its key is free again.
@@ -149,11 +159,12 @@ export function parse(text: string): Segment[] {
         const parent = stack.at(-1);
         (parent?.stretch.long ?? root).pop();
         (parent?.siblings ?? rootSiblings).delete(parent ? stretch.key.slice(parent.stretch.key.length + KEY_SEPARATOR.length) : stretch.key);
-        write(stretch.short);
+        write(lead === undefined ? stretch.short : lead.text + lead.short);
         continue;
       }
       stretch.isClosed = true;
       stretch.end = i - 2;
+      if (lead !== undefined) prependLead(stretch.long!, lead.text);
       // A multi-line short form is never shown (only linkable stretches are), so its long form stands alone.
       if (stretch.long !== undefined && !stretch.short.includes("\n")) keepShort(stretch.short, stretch.long);
       continue;
@@ -161,6 +172,8 @@ export function parse(text: string): Segment[] {
     write(text[i] ?? "");
     i += 1;
   }
+  // A reply cut off inside a stretch: its long form is drawn open, so it needs its borrowed words too.
+  for (const { stretch, lead } of stack) if (lead !== undefined && stretch.long !== undefined) prependLead(stretch.long, lead.text);
   return root;
 }
 
@@ -196,6 +209,49 @@ function dropRepeat(segments: Segment[], short: string, isRoot: boolean): void {
   const lead = before.slice(lineStart, cut).trim();
   if (lead !== "" && !/^([-*+>]|\d+[.)]|#+)$/.test(lead) && !/[.!?:;]$/.test(lead)) return;
   segments[segments.length - 2] = before.slice(0, cut);
+}
+
+/**
+ * A wordless short form (`ago{{.|…}}`, `Done. {{|…}}`) takes on the words before it, back to the start
+ * of their sentence on that line: they leave `segments` and become its short form, so they open it
+ * and name it in the read note; `prependLead` puts them back at the start of its long form once it
+ * closes. The last word before it is taken even when it ends a sentence, since a stretch after
+ * `Done. ` extends that sentence, and then the short form's own punctuation is not added again.
+ * Words holding code, links, markup brackets or a table pipe stop the walk, as does a list, quote or
+ * heading mark; an emphasis mark left unpaired, or no letter or digit taken, refuses the lead-in, and
+ * the stretch is drawn open. Returns the words taken, with the space after them, or undefined.
+ */
+function takeLeadIn(segments: Segment[], stretch: Stretch): string | undefined {
+  const before = segments.at(-2);
+  if (typeof before !== "string") return undefined;
+  const lineStart = before.lastIndexOf("\n") + 1;
+  const words = [...before.slice(lineStart).matchAll(/\S+/g)];
+  const endsSentence = (word: string) => /[.!?:;][*_~)"'”’]*$/.test(word);
+  let k = words.length - 1;
+  for (; k >= 0; k--) {
+    const word = words[k]![0];
+    if (/[`[\]<>|]/.test(word) || /^([-*+>]|\d+[.)]|#+)$/.test(word)) break;
+    if (k < words.length - 1 && endsSentence(word)) break;
+  }
+  // The lead-in starts on a word, so a comma or dash in front of it stays where it was.
+  let start = k + 1;
+  while (start < words.length && !/[\p{L}\p{N}]/u.test(words[start]![0])) start++;
+  if (start === words.length) return undefined;
+  const cut = lineStart + words[start]!.index!;
+  const lead = before.slice(cut);
+  const unpaired = lead.replace(/(\*\*|__|~~|\*|_)(?=\S)(.*?\S)\1/g, "$2");
+  if (/\*|~~|(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/u.test(unpaired)) return undefined;
+  segments[segments.length - 2] = before.slice(0, cut);
+  const taken = lead.trimEnd();
+  stretch.short = endsSentence(taken) ? taken : `${taken}${stretch.short.trim()}`;
+  return lead;
+}
+
+/** Borrowed words go back in front of the long form; one that starts a block (list, quote, fence) goes below them. */
+function prependLead(long: Segment[], lead: string): void {
+  const first = long[0];
+  if (typeof first !== "string") long.unshift(lead);
+  else long[0] = BLOCK_START.test(first.trimStart()) ? `${lead.trimEnd()}\n\n${first.trimStart()}` : `${lead}${first}`;
 }
 
 /** A long form that starts a block (list, quote, heading, fence) goes below a prepended short form, not after it on its line. */

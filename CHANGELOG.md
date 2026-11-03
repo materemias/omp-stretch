@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- A stretch whose short form is only punctuation such as a period, or empty, opens from the words of its sentence before it, and the read note names it by them. With no such words, it shows open.
+
 ## 0.3.2 (2026-10-27)
 
 ### Fixes
