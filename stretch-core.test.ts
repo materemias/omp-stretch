@@ -66,6 +66,13 @@ describe("parse", () => {
     expect(writeOpen(parse("**Checks pass. {{Checks pass.|Checks pass in CI.}}**"))).toBe(
       "**Checks pass. Checks pass in CI.**",
     );
+    // An underscore inside a word is not emphasis, so a snake_case copy goes too; a lone one keeps it.
+    expect(linkedMarkdown(parse("config_path. {{config_path.|config_path. holds the default.}}"), closed)).toBe(
+      "[config_path.](u/open/0)",
+    );
+    expect(writeOpen(parse("_Checks pass. {{Checks pass.|Checks pass in CI.}}_"))).toBe(
+      "_Checks pass. Checks pass in CI._",
+    );
   });
 
   test("a long form that rewrites its short form keeps it in front, so both ideas show open", () => {
@@ -311,6 +318,26 @@ describe("deepen", () => {
   test("an answer after a long form ending in a code fence starts its own paragraph", () => {
     const text = withAnswers("{{Run.|Run:\n```sh\nmake\n```}} after", [{ key: "Run.", text: "more" }]);
     expect(writeOpen(parse(text))).toBe("Run:\n```sh\nmake\n```\n\n✦ more after");
+  });
+
+  test("an answer after a long form ending in a table starts its own paragraph, saved or streaming", () => {
+    // GFM would take inline text after the last row as one more cell and drop it.
+    for (const table of ["| Name |\n| --- |\n| value |\n", "Name | Value\n--- | ---\na | b |"]) {
+      const block = `{{Results|Results:\n\n${table}}} Done.`;
+      expect(writeOpen(parse(withAnswers(block, [{ key: "Results", text: "More detail." }])))).toBe(
+        `Results:\n\n${table.trimEnd()}\n\n✦ More detail. Done.`,
+      );
+      const view = { ...closed, isOpen: () => true, deepen: { progress: () => ({ elapsedMs: 0, partial: "More detail." }) } };
+      const streaming = linkedMarkdown(parse(block), view);
+      expect(streaming).toContain(`${table.trimEnd()}\n\n✦ More detail.`);
+    }
+  });
+
+  test("a delimiter row inside a code fence is not a table, so the answer stays inline", () => {
+    const block = "{{Run|Run:\n```\na | b\n--- | ---\n```\nThen check it.}} Done.";
+    expect(writeOpen(parse(withAnswers(block, [{ key: "Run", text: "More." }])))).toBe(
+      "Run:\n```\na | b\n--- | ---\n```\nThen check it. ✦ More. Done.",
+    );
   });
 
   test("a second answer to the same stretch goes in after the first and is accepted", () => {

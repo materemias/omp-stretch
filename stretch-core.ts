@@ -225,7 +225,7 @@ function dropRepeat(segments: Segment[], short: string, isRoot: boolean): void {
   const cut = lineStart + words[k + 1]!.index!;
   if (before.includes("`", cut)) return;
   const unpaired = before.slice(cut).replace(/(\*\*|__|~~|\*|_)(?=\S)(.*?\S)\1/g, "$2");
-  if (/[*_~]/.test(unpaired)) return;
+  if (/[*~]|(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/u.test(unpaired)) return;
   const lead = before.slice(lineStart, cut).trim();
   if (lead !== "" && !/^([-*+>]|\d+[.)]|#+)$/.test(lead) && !/[.!?:;]$/.test(lead)) return;
   segments[segments.length - 2] = before.slice(0, cut);
@@ -551,8 +551,7 @@ export function linkedMarkdown(parts: Segment[], view: LinkView): string {
     // next « takes its place, instead of a row of closers stacking up.
     if (closers.some(c => text.endsWith(c))) return `${text}${trailing}`;
     // After a closing code fence or a table row, an inline « would break the block: give it a paragraph.
-    const lastLine = text.slice(text.lastIndexOf("\n") + 1);
-    const gap = /^\s*(`{3,}|~{3,}|\|)/.test(lastLine) ? "\n\n" : " ";
+    const gap = endsInBlock(text) ? "\n\n" : " ";
     const close = `[«](${view.href("close", index)})`;
     closers.push(close);
     // ✦ stands before the «: "more here", then the way back.
@@ -582,9 +581,33 @@ function waiting(elapsedMs: number, streamed: string): string {
 function arriving(section: string, streamed: string): string {
   const shown = streamed === "" ? "" : streamingView(parse(streamed)).trimEnd();
   if (shown === "") return section;
-  const lastLine = section.slice(section.lastIndexOf("\n") + 1);
-  const gap = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.test(lastLine) ? "\n\n" : " ";
-  return `${section}${gap}${DEEPEN} ${shown}`;
+  return `${section}${endsInBlock(section) ? "\n\n" : " "}${DEEPEN} ${shown}`;
+}
+
+/**
+ * A GFM table's delimiter row, such as `--- | :---:` or `| --- |`: leading and trailing pipes
+ * optional, inside a blockquote too.
+ */
+const TABLE_DELIMITER = /^[ \t]*(>[ \t]*)*(?=[^\n]*\|)\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+
+/**
+ * Whether `text` ends in a code fence or a table, which inline text after it would join or break.
+ * A table runs to the next blank line or block, so it is a delimiter row in the last paragraph with
+ * no code fence after it; one inside a fenced block is code.
+ */
+function endsInBlock(text: string): boolean {
+  const trimmed = text.trimEnd();
+  if (/^[ \t]*(`{3,}|~{3,}|\|)/.test(trimmed.slice(trimmed.lastIndexOf("\n") + 1))) return true;
+  let fence: string | undefined;
+  let table = false;
+  for (const line of (trimmed.split(/\n[ \t]*\n/).pop() ?? "").split("\n")) {
+    const marker = /^[ \t]*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (marker !== undefined && (fence === undefined || (marker[0] === fence[0] && marker.length >= fence.length))) {
+      fence = fence === undefined ? marker : undefined;
+      table = false;
+    } else if (fence === undefined && TABLE_DELIMITER.test(line)) table = true;
+  }
+  return table;
 }
 
 /**
@@ -650,9 +673,9 @@ export function withAnswers(text: string, answers: readonly DeepenAnswer[]): str
     // stretch share an offset: splice the later one first so the earlier one lands before it.
     for (const { answer, at } of ready.sort((a, b) => b.at - a.at || b.index - a.index)) {
       const before = out.slice(0, at);
-      const lastLine = before.slice(before.lastIndexOf("\n") + 1);
-      const gap = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.test(lastLine) ? "\n\n" : /\s$/.test(before) ? "" : " ";
-      out = `${before}${gap}{{${DEEPEN}|${DEEPEN} ${answer.text}}}${out.slice(at)}`;
+      // After a fence or table row the answer needs its own paragraph, or it joins the block.
+      const head = endsInBlock(before) ? `${before.trimEnd()}\n\n` : /\s$/.test(before) ? before : `${before} `;
+      out = `${head}{{${DEEPEN}|${DEEPEN} ${answer.text}}}${out.slice(at)}`;
     }
     left = left.filter(answer => !ready.some(r => r.answer === answer));
   }

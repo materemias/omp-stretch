@@ -12,6 +12,8 @@
 
 - A stretch whose short form is only punctuation such as a period, or empty, opens from the words of its sentence before it, and the read note names it by them. With no such words, it shows open.
 - Pressing ✦ again on a stretch that already has a ✦ answer adds the new answer after the first one, instead of failing with a warning.
+- A gist written before its stretch shows once even when it holds a `snake_case` word.
+- A ✦ answer after a long form ending in a table starts its own paragraph, instead of being dropped as an extra table cell.
 
 ## 0.3.2 (2026-10-27)
 
