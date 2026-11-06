@@ -4,7 +4,14 @@
 
 ![omp in Tern: a reply in gists, two stretches opened in place, one closed with «, ✦ asking the model for more in place, then /stretch light](docs/stretch.gif)
 
-Replies arrive short: one clause per paragraph or list item. Pick a linked phrase and its detail grows right where it stands; pick `«` and it shrinks back. At the bottom of a stretch, pick ✦ and the model writes more right there. The model is told which parts you opened, so it doesn't assume you read the rest. In Tern you pick by clicking. In a plain terminal you press `Alt+O` and type the letter tagged on the phrase, or click it with omp's mouse mode on.
+Replies arrive short: one clause per paragraph or list item. Pick a linked phrase and its detail grows right where it stands; pick `«` and it shrinks back. At the bottom of a stretch, pick ✦ and the model writes more right there. The model is told which parts you opened, so it doesn't assume you read the rest. In Tern you pick by clicking. In a plain terminal you press omp's link hint key (`Alt+O` by default) and type the letter tagged on the phrase, or click it with omp's mouse mode on; press the key twice to pick stretches that have scrolled off screen.
+
+<details>
+<summary>In a plain terminal</summary>
+
+![omp in kitty: Alt+O tags the stretches, typing a tag opens one in place, « closes it, ✦ asks the model for more, then Alt+O twice opens a stretch above the screen](docs/stretch-plain.gif)
+
+</details>
 
 Shamelessly copying [cc-stretch](https://github.com/pro-vi/cc-stretch), the stretchtext plugin for Claude Code, brought to [omp](https://github.com/can1357/oh-my-pi), in Tern and in plain terminals.
 
@@ -24,7 +31,7 @@ Then set it up for where you run omp:
     assistantText: true
   ```
 
-  Then pick how you open stretches. `Alt+O` works out of the box (omp's link hint key, `app.links.hint`). To click them instead, also turn on **Appearance → Display → Mouse Click-to-Focus**, or add `mouse: true` under `tui:` in `config.yml`. While mouse mode is on, omp takes over the mouse: select text with `Shift`+drag and scroll with `Shift`+wheel.
+  Then pick how you open stretches. omp's link hint key (`app.links.hint`, `Alt+O` by default) works out of the box. To click them instead, also turn on **Appearance → Display → Mouse Click-to-Focus**, or add `mouse: true` under `tui:` in `config.yml`. While mouse mode is on, omp takes over the mouse: select text with `Shift`+drag and scroll with `Shift`+wheel.
 - **Tern**, omp 18.11.0 or newer: link the Tern plugin, which opens stretches on click:
 
   ```sh
@@ -47,21 +54,20 @@ If you use omp's advisor, add this line to `~/.omp/agent/WATCHDOG.md` so it know
 
 To update, run `omp plugin upgrade omp-stretch@omp-stretch`. In Tern, run the `tern plugin link` line again too: Tern remembers the versioned folder the link pointed to.
 
-## In a plain terminal
+## Modes
 
-Set up as in [Install](#install). `Extension Reply Renderers` is off by default: while it's off, omp never asks the extension to draw replies.
+`/stretch <mode>` sets how much of each reply stays in view. The choice applies to every omp session; `/stretch status` shows what's in effect.
 
-`Alt+O` puts a letter over each stretch link on screen, and the footer shows that key (or yours, if you rebound `app.links.hint`) while the last reply has stretches. Type the letter to open that stretch, its `«` to close it, or its ✦ to ask for more. With mouse mode on (see [Install](#install)), click the link instead. For links that have scrolled up into the terminal's scrollback, press `Alt+O` twice: omp opens the whole transcript fullscreen with the same letters, and the stretch opens in place there.
-
-`Alt+O` is omp's default, and it takes the key from any other action you bound there. To use another key, set `app.links.hint` in `~/.omp/agent/keybindings.yml`, for example `app.links.hint: [Alt+E]`. The footer follows your binding.
-
-A stretch opens at once instead of growing word by word, and a ✦ answer appears when it's finished while the footer counts the seconds. omp redraws a reply in scrollback by rebuilding the whole scrollback, so neither can animate there.
+| Mode | In view |
+| --- | --- |
+| `dense` (default) | Each paragraph's gist only; the model uses stretches heavily. |
+| `light` | A sentence or two per paragraph; the model uses stretches sparingly. |
+| `section` (experimental) | One line per section under a heading; opening one shows that section in dense form. |
+| `off` | Plain replies, no stretches. |
 
 ## Benefits
 
-You read about 40% fewer words before clicking anything: 157 words per reply against 263 before, across my recent sessions. The detail is one click away, and details can hold further details. The cost is about 0.3% of a session's cost: the model writes every level up front, so you read less, but you don't pay less.
-
-`/stretch dense` (default) shows the gist, `/stretch light` keeps a sentence or two in view, and `/stretch off` turns stretches off. `/stretch section` (experimental) folds each section under a heading into one line; opening it shows that section in dense form. The choice applies to every omp session. `/stretch status` shows what's actually in effect.
+You read about 40% fewer words before opening anything: 157 words per reply against 263 before, across my recent sessions. The detail is one pick away, and details can hold further details. The cost is about 0.3% of a session's cost: the model writes every level up front, so you read less, but you don't pay less.
 
 Deep in a long session the model tends to stop writing stretches, and one plain reply tends to be followed by more. So when a reply comes back with 800 or more characters of prose (code blocks aside) and no stretches, your next message carries a one-line reminder, about 30 tokens.
 
@@ -79,6 +85,7 @@ A press is a model call. It reuses the conversation's prompt cache and is capped
 
 - **In Tern, it can break with any omp release.** Tern draws and clicks through a patch of an internal omp method and the Tern plugin. If that method is gone, the extension turns itself off; if it changes, the worst case is the raw `{{short|long}}` markup. Your sessions always keep the full text.
 - In a plain terminal, the links and picks go through omp's extension API and keep working without the patch. The patch only keeps replies readable while **Extension Reply Renderers** is off: without it, they show the raw markup there.
+- In a plain terminal, a stretch opens at once instead of growing word by word, and a ✦ answer appears when it's finished while the footer counts the seconds: redrawing a reply in scrollback rebuilds the whole scrollback, so neither can animate there.
 - Which stretches are open is forgotten when omp restarts.
 - `/btw` answers come plain, since that panel can't open stretches.
 - A literal placeholder without a pipe, such as `{{name}}`, stays unchanged. Put template expressions containing pipes in code spans so they are not mistaken for stretches.
