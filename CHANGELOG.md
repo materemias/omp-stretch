@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 (2026-11-06)
+
 ### Features
 
 - Stretches work in plain terminals on omp 18.17.0 or newer: press omp's link hint key (`app.links.hint`, `Alt+O` by default) and type a link's letter, or click it with omp's mouse mode on, to open a stretch, close it with `«`, or ask for more with ✦. Press the key twice to pick stretches that have scrolled off screen. The footer shows the key while the last reply has stretches. Needs **Tools → Extensions → Extension Reply Renderers** on; `/stretch status` lists what's needed.
