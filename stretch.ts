@@ -2,12 +2,12 @@
 // chat shows each short form as a link, and picking it grows it in place. The session keeps the
 // model's markup as written.
 //
-// This patches AssistantMessageComponent.updateContent to rewrite the displayed text. In Tern, clicks
-// reach omp through the `omp-stretch` Tern plugin (tern-plugin/), which claims links to
+// In Tern, this patches AssistantMessageComponent.updateContent to rewrite the displayed text, and
+// clicks reach omp through the `omp-stretch` Tern plugin (tern-plugin/), which claims links to
 // cc-stretch.invalid and drops each as a file in this process's click directory. In a plain terminal
-// the patch leaves the markup to an assistant text renderer, which draws `cc-stretch:` links that omp
-// lets the reader pick by hint tag or click and hands to `link_activate`. Where no pick can land,
-// stretches are drawn open and the model is not asked to write them.
+// an assistant text renderer draws `cc-stretch:` links that omp lets the reader pick by hint tag or
+// click and hands to `link_activate`; the patch only covers omp's renderers being off. Where no pick
+// can land, stretches are drawn open and the model is not asked to write them.
 import {
   type FSWatcher,
   mkdirSync,
@@ -54,7 +54,8 @@ import {
 } from "./stretch-core.ts";
 
 // An internal omp module, served to extensions only from omp 18.11.0. On an older or restructured
-// omp the extension does nothing: no guide, so the model writes no stretches it cannot show.
+// omp, Tern gets nothing: no guide, so the model writes no stretches it cannot show. A plain terminal
+// carries on through omp's extension API.
 const Component: typeof AssistantMessageComponent | undefined = await import(
   "@oh-my-pi/pi-tui/chat/assistant-message"
 ).then(
@@ -104,10 +105,11 @@ type Shared = {
   /** Final replies with stretches on screen, by timestamp: the whole reply and the components drawing it. */
   shown: Map<number, { message: AssistantMessage; components: WeakRef<AssistantMessageComponent>[] }>;
   /**
-   * Outside Tern, the text of each block the text renderer drew as links, as written. A block sealed
-   * at a tool call draws links before its reply is in `shown`, and picks must resolve there too.
+   * Outside Tern, the text of each block the text renderer drew, as written. Picks resolve against it,
+   * since a block sealed at a tool call draws links before its reply is in `shown`, and its ids say
+   * which replies a mode change redraws, with or without the patch.
    */
-  linkBlocks: Map<BlockId, string>;
+  renderedBlocks: Map<BlockId, string>;
   /**
    * The part of its reply each component draws. omp draws a reply with tool calls as one component per
    * segment, each holding only its own blocks under the reply's timestamp.
@@ -132,7 +134,7 @@ type Shared = {
   linkClicks?: () => boolean;
   /** Draws a reply again through omp's text renderers (`ctx.ui.rerenderMessage`), outside Tern. */
   rerender?: (timestamp: number) => void;
-  /** A reply with stretches is being drawn, outside Tern: what links it shows may have changed. */
+  /** A reply is being drawn, outside Tern: what links it shows may have changed. */
   replyDrawn?: (timestamp: number) => void;
   /** Outside Tern: the footer's line on the ✦ presses running. */
   pressStatus?: (text: string | undefined) => void;
@@ -190,7 +192,7 @@ const state = ((globalThis as Record<symbol, Partial<Shared> | undefined>)[Symbo
 state.openKeys ??= new Map();
 state.seen ??= new Set();
 state.shown ??= new Map();
-state.linkBlocks ??= new Map();
+state.renderedBlocks ??= new Map();
 state.segments ??= new WeakMap();
 state.replies ??= new Map();
 state.sources ??= new WeakMap();
@@ -199,7 +201,7 @@ state.running ??= new Map();
 state.deepened ??= [];
 delete (state as { produced?: unknown }).produced;
 const shared = state as Shared;
-const { openKeys, seen, shown, linkBlocks, segments, replies, sources, answers, running } = shared;
+const { openKeys, seen, shown, renderedBlocks, segments, replies, sources, answers, running } = shared;
 const modeOf = (): Mode => shared.mode ?? "dense";
 /** Outside Tern: whether omp lets the reader pick the links the text renderer draws. */
 const pickable = () => shared.linkClicks?.() === true;
@@ -284,19 +286,27 @@ function drawLinks(parts: Segment[], id: BlockId, href: LinkView["href"]): strin
 
 type TextRenderer = Parameters<ExtensionAPI["registerAssistantTextRenderer"]>[0];
 
+/** A reply is being drawn: count it for `redrawAll`, and what links it shows may have changed. */
+function noteDrawn(timestamp: number): void {
+  shared.drawnNow?.add(timestamp);
+  shared.replyDrawn?.(timestamp);
+}
+
 /**
- * The plain-terminal drawing, as omp's assistant text renderer, of the blocks the patch left as
- * written: short forms while streaming, then links of the scheme this extension claimed, or long
- * forms with stretches off. Where no pick can land the patch has already drawn the block open.
+ * The plain-terminal drawing, as omp's assistant text renderer: short forms while streaming, then
+ * links of the scheme this extension claimed, or long forms with stretches off or where no pick can
+ * land. Blocks the patch already drew open have no markup left to find.
  */
 const renderText: TextRenderer = ({ message, contentIndex, text, streaming }) => {
-  if (CLICKABLE || !text.includes("{{")) return undefined;
+  if (CLICKABLE) return undefined;
+  noteDrawn(message.timestamp);
+  if (!text.includes("{{")) return undefined;
   const id: BlockId = `${message.timestamp}.${contentIndex}`;
   const parts = parse(streaming ? text : spliced(id, text));
   if (stretches(parts).length === 0) return undefined;
   if (streaming) return streamingView(parts);
-  if (shared.mode === "off") return writeOpen(parts);
-  linkBlocks.set(id, text);
+  renderedBlocks.set(id, text);
+  if (shared.mode === "off" || !pickable()) return writeOpen(parts);
   return drawLinks(parts, id, (op, index) => `${LINK_SCHEME}:${op}/${message.timestamp}/${contentIndex}/${index}`);
 };
 
@@ -310,8 +320,7 @@ const wrapper: UpdateContent = function (this: AssistantMessageComponent, messag
   const source = sources.get(message.content);
   const segment = source === undefined ? message : { ...message, content: source };
   if (!hasMarkup(segment.content)) return original.call(this, segment, opts);
-  shared.drawnNow?.add(segment.timestamp);
-  shared.replyDrawn?.(segment.timestamp);
+  noteDrawn(segment.timestamp);
   if (opts?.transient === true) return original.call(this, view(segment, undefined), opts);
   const whole = wholeReply(segment);
   segments.set(this, segment);
@@ -380,8 +389,12 @@ function redraw(timestamp: number): void {
 function redrawAll(): void {
   const drawn = new Set<number>();
   shared.drawnNow = drawn;
+  // A block id starts with its reply's timestamp. Outside Tern the renderer records the replies it
+  // drew with links; the patch, when present, also records those it drew open.
+  const timestamps = new Set(shown.keys());
+  if (!CLICKABLE) for (const id of renderedBlocks.keys()) timestamps.add(Number.parseInt(id, 10));
   try {
-    for (const timestamp of [...shown.keys()]) {
+    for (const timestamp of [...timestamps]) {
       if (!drawn.has(timestamp)) redraw(timestamp);
     }
   } finally {
@@ -393,7 +406,7 @@ type Found = { stretch: Stretch; index: number };
 
 /** The text of a block as written: as the text renderer last got it, else from the reply on screen. */
 function blockText(timestamp: number, blockIndex: number): string | undefined {
-  const drawn = linkBlocks.get(`${timestamp}.${blockIndex}`);
+  const drawn = renderedBlocks.get(`${timestamp}.${blockIndex}`);
   if (drawn !== undefined) return drawn;
   const block = shown.get(timestamp)?.message.content[blockIndex];
   return block?.type === "text" ? block.text : undefined;
@@ -639,7 +652,13 @@ function statusText(): string {
   const savedText =
     saved === undefined ? `nothing saved in ${MODE_FILE} (default dense)` : `${saved} (${MODE_FILE})`;
   const pending = saved !== undefined && saved !== modeOf() ? `; switches to ${saved} on the next message` : "";
-  const drawing = Component?.prototype.updateContent === wrapper ? "patched" : "not patched (replies show as omp draws them)";
+  const patched = Component?.prototype.updateContent === wrapper;
+  const drawing =
+    !CLICKABLE && linkApi
+      ? `omp's text renderer${patched ? "" : "; not patched, so with Extension Reply Renderers off replies show as written"}`
+      : patched
+        ? "patched"
+        : "not patched (replies show as omp draws them)";
   const clicks = CLICKABLE
     ? shared.watcher
       ? "on (Tern; needs the omp-stretch Tern plugin)"
@@ -670,9 +689,10 @@ const PICK_HELP =
   "needs omp 18.17.0 or newer with Tools → Extensions → Extension Reply Renderers (extensionRenderers.assistantText) on, and the link hint key (app.links.hint) bound or tui.mouse on";
 
 export default function stretch(pi: ExtensionAPI): void {
-  if (!Component) return;
-  patch();
   linkApi = typeof pi.registerAssistantTextRenderer === "function" && typeof pi.registerLinkScheme === "function";
+  // Tern draws through the patch alone; a plain terminal carries on through omp's extension API.
+  if (!Component && (CLICKABLE || !linkApi)) return;
+  patch();
   // In Tern too, where it draws nothing: a text renderer keeps omp loading this file before the
   // first frame, so a resumed transcript goes through the patch instead of showing raw markup.
   if (linkApi) pi.registerAssistantTextRenderer(renderText);
@@ -856,7 +876,7 @@ export default function stretch(pi: ExtensionAPI): void {
     // A fork keeps the transcript on screen, so its replies must stay clickable.
     if (event.reason === "fork") return;
     shown.clear();
-    linkBlocks.clear();
+    renderedBlocks.clear();
     replies.clear();
   });
   // /tree moves to another branch of the same session: its answers and unreported notes differ.

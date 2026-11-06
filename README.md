@@ -77,7 +77,8 @@ A press is a model call. It reuses the conversation's prompt cache and is capped
 
 ## Limits
 
-- **It can break with any omp release.** To draw replies, this patches an internal omp method. If that method changes, the extension turns itself off, or at worst shows the raw `{{short|long}}` markup. Your sessions always keep the full text. In a plain terminal, the links and their picks go through omp's extension API ([#16238](https://github.com/can1357/oh-my-pi/pull/16238), [#16239](https://github.com/can1357/oh-my-pi/pull/16239), [#16476](https://github.com/can1357/oh-my-pi/pull/16476)); Tern still needs the patch and the Tern plugin.
+- **In Tern, it can break with any omp release.** Tern draws and clicks through a patch of an internal omp method and the Tern plugin. If that method is gone, the extension turns itself off; if it changes, the worst case is the raw `{{short|long}}` markup. Your sessions always keep the full text.
+- In a plain terminal, the links and picks go through omp's extension API and keep working without the patch. The patch only keeps replies readable while **Extension Reply Renderers** is off: without it, they show the raw markup there.
 - Which stretches are open is forgotten when omp restarts.
 - `/btw` answers come plain, since that panel can't open stretches.
 - A literal placeholder without a pipe, such as `{{name}}`, stays unchanged. Put template expressions containing pipes in code spans so they are not mistaken for stretches.
