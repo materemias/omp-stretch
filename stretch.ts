@@ -1,12 +1,13 @@
-// Stretchtext replies for omp in Tern, after pro-vi/cc-stretch (MIT): the model writes
-// `{{short|long}}`, the chat shows each short form as a link, and a click grows it in place.
+// Stretchtext replies for omp, after pro-vi/cc-stretch (MIT): the model writes `{{short|long}}`, the
+// chat shows each short form as a link, and picking it grows it in place. The session keeps the
+// model's markup as written.
 //
-// omp gives extensions no hook into how a reply is drawn, so this patches
-// AssistantMessageComponent.updateContent to rewrite the displayed text; the session keeps the
-// model's markup as written. Clicks reach omp through the `omp-stretch` Tern plugin
-// (tern-plugin/), which claims links to cc-stretch.invalid and drops each as a file in this
-// process's click directory. Outside Tern no click lands, so stretches are drawn open and the model
-// is not asked to write them.
+// This patches AssistantMessageComponent.updateContent to rewrite the displayed text. In Tern, clicks
+// reach omp through the `omp-stretch` Tern plugin (tern-plugin/), which claims links to
+// cc-stretch.invalid and drops each as a file in this process's click directory. In a plain terminal
+// the patch leaves the markup to an assistant text renderer, which draws `cc-stretch:` links that omp
+// lets the reader pick by hint tag or click and hands to `link_activate`. Where no pick can land,
+// stretches are drawn open and the model is not asked to write them.
 import {
   type FSWatcher,
   mkdirSync,
@@ -36,11 +37,15 @@ import {
   isPlainReply,
   KEY_SEPARATOR,
   lengthOf,
+  LINK_SCHEME,
+  type LinkView,
   type Mode,
   type LinkOp,
   linkedMarkdown,
   parse,
+  parseClick,
   promptTransition,
+  type Segment,
   streamingView,
   type Stretch,
   stretches,
@@ -57,6 +62,12 @@ const Component: typeof AssistantMessageComponent | undefined = await import(
     typeof module.AssistantMessageComponent?.prototype?.updateContent === "function"
       ? module.AssistantMessageComponent
       : undefined,
+  () => undefined,
+);
+
+// omp's key hints, to name the link hint key in the footer; internal, so it may be missing.
+const linkHintKey: (() => string) | undefined = await import("@oh-my-pi/pi-tui/chrome/keybinding-hints").then(
+  module => (typeof module.editorKey === "function" ? () => module.editorKey("app.links.hint") : undefined),
   () => undefined,
 );
 
@@ -93,6 +104,11 @@ type Shared = {
   /** Final replies with stretches on screen, by timestamp: the whole reply and the components drawing it. */
   shown: Map<number, { message: AssistantMessage; components: WeakRef<AssistantMessageComponent>[] }>;
   /**
+   * Outside Tern, the text of each block the text renderer drew as links, as written. A block sealed
+   * at a tool call draws links before its reply is in `shown`, and picks must resolve there too.
+   */
+  linkBlocks: Map<BlockId, string>;
+  /**
    * The part of its reply each component draws. omp draws a reply with tool calls as one component per
    * segment, each holding only its own blocks under the reply's timestamp.
    */
@@ -112,6 +128,16 @@ type Shared = {
    */
   mode?: Mode;
   requestRender?: () => void;
+  /** Whether omp lets the reader pick `cc-stretch:` links now; set by the main TUI session outside Tern. */
+  linkClicks?: () => boolean;
+  /** Draws a reply again through omp's text renderers (`ctx.ui.rerenderMessage`), outside Tern. */
+  rerender?: (timestamp: number) => void;
+  /** A reply with stretches is being drawn, outside Tern: what links it shows may have changed. */
+  replyDrawn?: (timestamp: number) => void;
+  /** Outside Tern: the footer's line on the ✦ presses running. */
+  pressStatus?: (text: string | undefined) => void;
+  /** While `redrawAll` runs: the replies drawn so far, by whichever redraw reached them. */
+  drawnNow?: Set<number>;
   watcher?: FSWatcher;
   /** omp's own method while the patch is installed. */
   original?: AssistantMessageComponent["updateContent"];
@@ -126,7 +152,7 @@ type Shared = {
    * session on every start and switch, so they never reach another session and survive a restart.
    */
   deepened: { section: string; text: string }[];
-  /** The main session's side turn, its entry writer and its toasts; unset outside the main Tern TUI. */
+  /** The main session's side turn, its entry writer and its toasts; unset outside the main TUI. */
   ask?: (promptText: string, onDelta: (delta: string) => void, signal: AbortSignal) => Promise<string>;
   save?: (entry: { block: BlockId; section: string } & DeepenAnswer) => void;
   warn?: (message: string) => void;
@@ -164,6 +190,7 @@ const state = ((globalThis as Record<symbol, Partial<Shared> | undefined>)[Symbo
 state.openKeys ??= new Map();
 state.seen ??= new Set();
 state.shown ??= new Map();
+state.linkBlocks ??= new Map();
 state.segments ??= new WeakMap();
 state.replies ??= new Map();
 state.sources ??= new WeakMap();
@@ -172,9 +199,15 @@ state.running ??= new Map();
 state.deepened ??= [];
 delete (state as { produced?: unknown }).produced;
 const shared = state as Shared;
-const { openKeys, seen, shown, segments, replies, sources, answers, running } = shared;
+const { openKeys, seen, shown, linkBlocks, segments, replies, sources, answers, running } = shared;
 const modeOf = (): Mode => shared.mode ?? "dense";
-
+/** Outside Tern: whether omp lets the reader pick the links the text renderer draws. */
+const pickable = () => shared.linkClicks?.() === true;
+/**
+ * Set at load when this omp has extension text renderers and link schemes. Picks need 18.17.0: from
+ * 18.15.0 omp loads an extension late from its second launch on, and its links stop reaching here.
+ */
+let linkApi = false;
 /** One block's text with its ✦ answers spliced in; cached per answer list, which a new answer replaces. */
 const splicedCache = new WeakMap<readonly DeepenAnswer[], { text: string; out: string }>();
 function spliced(id: BlockId, text: string): string {
@@ -213,6 +246,9 @@ function wholeReply(segment: AssistantMessage): AssistantMessage {
 function view(segment: AssistantMessage, whole: AssistantMessage | undefined): AssistantMessage {
   const content = segment.content.map((block, i) => {
     if (block.type !== "text" || !block.text.includes("{{")) return block;
+    // Where omp routes the links' picks here, the text renderer draws the block as it streams and
+    // after: a streaming draw rewritten here would reach the renderer's final call without markup.
+    if (!CLICKABLE && pickable()) return block;
     if (whole === undefined) {
       const parts = parse(block.text);
       return stretches(parts).length === 0 ? block : { ...block, text: streamingView(parts) };
@@ -222,25 +258,47 @@ function view(segment: AssistantMessage, whole: AssistantMessage | undefined): A
     const id: BlockId = `${segment.timestamp}.${at}`;
     const parts = parse(spliced(id, block.text));
     if (stretches(parts).length === 0) return block;
-    if (!CLICKABLE || shared.mode === "off") return { ...block, text: writeOpen(parts) };
-    const open = openKeys.get(id);
-    const now = shared.growing?.block === id ? shared.growing : undefined;
-    const text = linkedMarkdown(parts, {
-      href: (op, index) => `${HREF}${op}/${segment.timestamp}/${at}/${index}`,
-      isOpen: key => open?.has(key) === true,
-      growing: now && { key: now.key, progress: Math.min(1, (Date.now() - now.start) / now.duration) },
-      deepen: shared.ask && {
-        progress: key => {
-          const press = running.get(`${id}\0${key}`);
-          return press && { elapsedMs: Date.now() - press.start, partial: press.partial };
-        },
-      },
-    });
-    return { ...block, text };
+    if (shared.mode === "off" || !CLICKABLE) return { ...block, text: writeOpen(parts) };
+    return { ...block, text: drawLinks(parts, id, (op, index) => `${HREF}${op}/${segment.timestamp}/${at}/${index}`) };
   });
   sources.set(content, segment.content);
   return { ...segment, content };
 }
+
+/** Block `id` as links: open stretches drawn open, one growing part-way, and ✦ presses as they run. */
+function drawLinks(parts: Segment[], id: BlockId, href: LinkView["href"]): string {
+  const open = openKeys.get(id);
+  const now = shared.growing?.block === id ? shared.growing : undefined;
+  return linkedMarkdown(parts, {
+    href,
+    isOpen: key => open?.has(key) === true,
+    growing: now && { key: now.key, progress: Math.min(1, (Date.now() - now.start) / now.duration) },
+    deepen: shared.ask && {
+      progress: key => {
+        const press = running.get(`${id}\0${key}`);
+        return press && { elapsedMs: Date.now() - press.start, partial: press.partial };
+      },
+    },
+  });
+}
+
+type TextRenderer = Parameters<ExtensionAPI["registerAssistantTextRenderer"]>[0];
+
+/**
+ * The plain-terminal drawing, as omp's assistant text renderer, of the blocks the patch left as
+ * written: short forms while streaming, then links of the scheme this extension claimed, or long
+ * forms with stretches off. Where no pick can land the patch has already drawn the block open.
+ */
+const renderText: TextRenderer = ({ message, contentIndex, text, streaming }) => {
+  if (CLICKABLE || !text.includes("{{")) return undefined;
+  const id: BlockId = `${message.timestamp}.${contentIndex}`;
+  const parts = parse(streaming ? text : spliced(id, text));
+  if (stretches(parts).length === 0) return undefined;
+  if (streaming) return streamingView(parts);
+  if (shared.mode === "off") return writeOpen(parts);
+  linkBlocks.set(id, text);
+  return drawLinks(parts, id, (op, index) => `${LINK_SCHEME}:${op}/${message.timestamp}/${contentIndex}/${index}`);
+};
 
 type UpdateContent = AssistantMessageComponent["updateContent"];
 
@@ -252,6 +310,8 @@ const wrapper: UpdateContent = function (this: AssistantMessageComponent, messag
   const source = sources.get(message.content);
   const segment = source === undefined ? message : { ...message, content: source };
   if (!hasMarkup(segment.content)) return original.call(this, segment, opts);
+  shared.drawnNow?.add(segment.timestamp);
+  shared.replyDrawn?.(segment.timestamp);
   if (opts?.transient === true) return original.call(this, view(segment, undefined), opts);
   const whole = wholeReply(segment);
   segments.set(this, segment);
@@ -286,9 +346,18 @@ function unpatch(): void {
   shared.watcher = undefined;
   shared.growing = undefined;
   shared.requestRender = undefined;
+  shared.linkClicks = undefined;
+  shared.rerender = undefined;
+  shared.replyDrawn = undefined;
+  shared.pressStatus = undefined;
 }
 
 function redraw(timestamp: number): void {
+  // omp redraws the reply wherever it is drawn: the viewport, the scrollback, or the link browser.
+  if (!CLICKABLE) {
+    shared.rerender?.(timestamp);
+    return;
+  }
   const entry = shown.get(timestamp);
   if (entry === undefined) return;
   entry.components = entry.components.filter(ref => ref.deref() !== undefined);
@@ -304,13 +373,36 @@ function redraw(timestamp: number): void {
   shared.requestRender?.();
 }
 
+/**
+ * Redraw every reply on screen. In a plain terminal, redrawing one with rows in scrollback rebuilds
+ * the whole scrollback, which draws the others: oldest first, and each is skipped once drawn.
+ */
+function redrawAll(): void {
+  const drawn = new Set<number>();
+  shared.drawnNow = drawn;
+  try {
+    for (const timestamp of [...shown.keys()]) {
+      if (!drawn.has(timestamp)) redraw(timestamp);
+    }
+  } finally {
+    shared.drawnNow = undefined;
+  }
+}
+
 type Found = { stretch: Stretch; index: number };
+
+/** The text of a block as written: as the text renderer last got it, else from the reply on screen. */
+function blockText(timestamp: number, blockIndex: number): string | undefined {
+  const drawn = linkBlocks.get(`${timestamp}.${blockIndex}`);
+  if (drawn !== undefined) return drawn;
+  const block = shown.get(timestamp)?.message.content[blockIndex];
+  return block?.type === "text" ? block.text : undefined;
+}
 
 /** The block's stretches, ✦ answers spliced in, as its links number them. */
 function allStretches(timestamp: number, blockIndex: number): Stretch[] {
-  const block = shown.get(timestamp)?.message.content[blockIndex];
-  if (block?.type !== "text") return [];
-  return stretches(parse(spliced(`${timestamp}.${blockIndex}`, block.text)));
+  const text = blockText(timestamp, blockIndex);
+  return text === undefined ? [] : stretches(parse(spliced(`${timestamp}.${blockIndex}`, text)));
 }
 
 function stretchAt(timestamp: number, blockIndex: number, pick: (all: Stretch[]) => number): Found | undefined {
@@ -327,6 +419,12 @@ function click(op: LinkOp, timestamp: number, blockIndex: number, index: number)
   else setOpen(timestamp, blockIndex, found.stretch.key, op === "open", found);
 }
 
+/** Outside Tern, tell the footer how long the oldest ✦ press has run, or that none is left. */
+function showPresses(): void {
+  const [oldest] = running.values();
+  shared.pressStatus?.(oldest && `${DEEPEN} writing… ${Math.floor((Date.now() - oldest.start) / 1000)}s`);
+}
+
 /**
  * A ✦ press: ask the model, in a side turn over the whole conversation, for what comes next inside
  * one fully open stretch. While it waits the ✦ twinkles with a seconds count, the answer streams in
@@ -341,11 +439,14 @@ async function deepen(timestamp: number, blockIndex: number, found: Found): Prom
   if (!shared.ask || !signal || running.has(tag) || !isLinkable(stretch) || !canDeepen(stretch, open)) return;
   const press = { start: Date.now(), partial: "" };
   running.set(tag, press);
-  // Redraw while the press runs: the twinkle and the seconds move even before any text arrives.
+  // While the press runs, the twinkle and the seconds move even before any text arrives. A plain
+  // terminal counts in the footer instead: each redraw of a reply with rows in scrollback would
+  // rebuild the scrollback, so the answer appears once, when it is done.
   const tick = () => {
     if (running.get(tag) !== press) return;
     try {
-      redraw(timestamp);
+      if (CLICKABLE) redraw(timestamp);
+      else showPresses();
     } catch {}
     setTimeout(tick, TWINKLE_MS).unref();
   };
@@ -360,9 +461,8 @@ async function deepen(timestamp: number, blockIndex: number, found: Found): Prom
     }, signal);
     // A switch or a /tree move aborted the press; a fork keeps it, and it lands in the forked session.
     if (signal.aborted) return;
-    const block = shown.get(timestamp)?.message.content[blockIndex];
-    const answer =
-      block?.type === "text" ? spliceAnswer(block.text, answers.get(id) ?? [], stretch.key, reply) : undefined;
+    const text = blockText(timestamp, blockIndex);
+    const answer = text === undefined ? undefined : spliceAnswer(text, answers.get(id) ?? [], stretch.key, reply);
     if (answer === undefined) {
       shared.warn?.(`${DEEPEN} The answer came back empty, too long or with broken markup; press again to retry.`);
       return;
@@ -380,6 +480,7 @@ async function deepen(timestamp: number, blockIndex: number, found: Found): Prom
     if (!signal.aborted) shared.warn?.(`${DEEPEN} failed: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     running.delete(tag);
+    if (!CLICKABLE) showPresses();
     redraw(timestamp);
   }
 }
@@ -402,6 +503,11 @@ function setOpen(timestamp: number, blockIndex: number, key: string, isOpen: boo
   if (open.has(key)) return;
   open.add(key);
   seen.add(`${id}\0${key}`);
+  // A plain terminal redraws a reply with rows in scrollback by rebuilding the scrollback: no growth.
+  if (!CLICKABLE) {
+    redraw(timestamp);
+    return;
+  }
   const at = found ?? stretchAt(timestamp, blockIndex, all => all.findIndex(s => s.key === key));
   if (at === undefined) return;
   const duration = Math.min(700, 45 * lengthOf(at.stretch.long ?? []));
@@ -466,8 +572,8 @@ function drainClicks(): void {
     } catch {
       continue;
     }
-    const match = /^(open|close|deepen)\/(\d+)\/(\d+)\/(\d+)$/.exec(body);
-    if (match) click(match[1] as LinkOp, Number(match[2]), Number(match[3]), Number(match[4]));
+    const found = parseClick(body);
+    if (found) click(found.op, found.timestamp, found.blockIndex, found.index);
   }
 }
 
@@ -534,11 +640,13 @@ function statusText(): string {
     saved === undefined ? `nothing saved in ${MODE_FILE} (default dense)` : `${saved} (${MODE_FILE})`;
   const pending = saved !== undefined && saved !== modeOf() ? `; switches to ${saved} on the next message` : "";
   const drawing = Component?.prototype.updateContent === wrapper ? "patched" : "not patched (replies show as omp draws them)";
-  const clicks = !CLICKABLE
-    ? "off: not in Tern, stretches drawn open"
-    : shared.watcher
+  const clicks = CLICKABLE
+    ? shared.watcher
       ? "on (Tern; needs the omp-stretch Tern plugin)"
-      : "off: click watcher not running";
+      : "off: click watcher not running"
+    : linkApi && pickable()
+      ? "on: the link hint key (app.links.hint) tags each stretch to pick, or click one with tui.mouse on"
+      : `off: ${PICK_HELP}; stretches drawn open`;
   return [
     `Stretchtext in this omp: ${modeOf()}${pending}`,
     `Saved for every session: ${savedText}`,
@@ -547,32 +655,79 @@ function statusText(): string {
   ].join("\n");
 }
 
+/** Footer status keys in a plain terminal: how to open a stretch, and the ✦ presses running. */
+const PICK_STATUS_KEY = "stretch";
+const PRESS_STATUS_KEY = "stretch-press";
+
+/** The footer's line on opening a stretch: the key as bound, or the mouse where it is unbound. */
+function pickHint(): string {
+  const key = linkHintKey?.();
+  return key === "" ? "Click a stretch to open it" : `${key ?? "app.links.hint"}: open a stretch`;
+}
+
+/** What makes `cc-stretch:` links pickable in a plain terminal. */
+const PICK_HELP =
+  "needs omp 18.17.0 or newer with Tools → Extensions → Extension Reply Renderers (extensionRenderers.assistantText) on, and the link hint key (app.links.hint) bound or tui.mouse on";
+
 export default function stretch(pi: ExtensionAPI): void {
   if (!Component) return;
   patch();
+  linkApi = typeof pi.registerAssistantTextRenderer === "function" && typeof pi.registerLinkScheme === "function";
+  // In Tern too, where it draws nothing: a text renderer keeps omp loading this file before the
+  // first frame, so a resumed transcript goes through the patch instead of showing raw markup.
+  if (linkApi) pi.registerAssistantTextRenderer(renderText);
+  if (linkApi && !CLICKABLE) {
+    pi.registerLinkScheme(LINK_SCHEME);
+    // Redraws go through the main session's UI, which is also the one a focused subagent's pick gets.
+    pi.on("link_activate", ({ url, scheme }) => {
+      const found = parseClick(url.slice(scheme.length + 1));
+      if (found) click(found.op, found.timestamp, found.blockIndex, found.index);
+    });
+  }
   /** Linkable stretches of the main session's replies since the last note. */
   let pending: { id: string; short: string }[] = [];
   shared.wrote = written => pending.push(...written);
-  /** Set by `/stretch` when the mode changes, until the next prompt tells the model. */
-  let switched: Mode | undefined;
+  /** The mode the last prompt asked the model for; unset before this import's first prompt. */
+  let prompted: Mode | undefined;
   /** The main session's last long reply had no stretches: the next prompt reminds the model once. */
   let lastPlain = false;
-  const isMainTui = (ctx: { mode: string; agent: { kind: string } }) =>
-    CLICKABLE && ctx.mode === "tui" && ctx.agent.kind === "main";
-  const active = (ctx: { mode: string; agent: { kind: string } }) => isMainTui(ctx) && shared.mode !== "off";
+  const isMainTui = (ctx: { mode: string; agent: { kind: string } }) => ctx.mode === "tui" && ctx.agent.kind === "main";
+  /** Whether the reader can open a stretch: through the Tern plugin, or by picking the links omp routes here. */
+  const pickableIn = (ctx: ExtensionContext) => CLICKABLE || ctx.ui.getLinkClicksAvailable?.() === true;
+  const active = (ctx: ExtensionContext) => isMainTui(ctx) && pickableIn(ctx) && shared.mode !== "off";
+  /** The last reply the footer hint was decided for, and the hint shown. */
+  let hintReply: AssistantMessage | undefined;
+  let hintShown: string | undefined;
+  /**
+   * In a plain terminal, show in the footer how to open a stretch while the last reply, `message`,
+   * has one to open; Tern readers click instead.
+   */
+  const syncPickHint = (ctx: ExtensionContext, message: AssistantMessage | undefined) => {
+    if (CLICKABLE || !isMainTui(ctx)) return;
+    hintReply = message;
+    const openable =
+      message !== undefined &&
+      active(ctx) &&
+      message.content.some(
+        block => block.type === "text" && block.text.includes("{{") && stretches(parse(block.text)).some(isLinkable),
+      );
+    const hint = openable ? pickHint() : undefined;
+    if (hint === hintShown) return;
+    hintShown = hint;
+    ctx.ui.setStatus?.(PICK_STATUS_KEY, hint);
+  };
   // A process's first import starts from the saved mode; the model has no guide yet, so no note.
   shared.mode ??= readSavedMode();
 
   /** Switch this process to `next`: the next prompt tells the model, and `off` changes redraw replies. */
   const applyMode = (next: Mode) => {
     if (modeOf() === next) return;
-    switched = next;
-    const redrawAll = (modeOf() === "off") !== (next === "off");
+    const linksChange = (modeOf() === "off") !== (next === "off");
     shared.mode = next;
-    if (!redrawAll) return;
+    if (!linksChange) return;
     pending = [];
     // Redraw replies on screen: links when on, fully open text when off.
-    for (const timestamp of [...shown.keys()]) redraw(timestamp);
+    redrawAll();
   };
 
   pi.registerCommand("stretch", {
@@ -605,7 +760,7 @@ export default function stretch(pi: ExtensionAPI): void {
         ctx.ui.notify("Usage: /stretch dense | light | section | off | status", "warning");
         return;
       }
-      const where = CLICKABLE ? "" : " (outside Tern stretches are always drawn open and never requested)";
+      const where = pickableIn(ctx) ? "" : " (here stretches are drawn open and never requested: see /stretch status)";
       ctx.ui.notify(`Stretchtext is ${modeOf()} for every omp session${where}.`, "info");
     },
   });
@@ -646,6 +801,7 @@ export default function stretch(pi: ExtensionAPI): void {
     answers.clear();
     shared.deepened.length = 0;
     lastPlain = false;
+    let lastReply: AssistantMessage | undefined;
     type Entry = { type?: string; customType?: string; content?: unknown; data?: unknown; message?: { role?: string; content?: unknown } };
     for (const entry of ctx.sessionManager.getBranch() as Entry[]) {
       if (entry.type === "message") {
@@ -653,6 +809,7 @@ export default function stretch(pi: ExtensionAPI): void {
         if (entry.message?.role === "user") lastPlain = false;
         if (entry.message?.role === "assistant" && Array.isArray(entry.message.content)) {
           lastPlain = plainVerdict(entry.message as AssistantMessage) ?? lastPlain;
+          lastReply = entry.message as AssistantMessage;
         }
         continue;
       }
@@ -666,12 +823,24 @@ export default function stretch(pi: ExtensionAPI): void {
       answers.set(data.block, [...(answers.get(data.block) ?? []), { key: data.key, text: data.text }]);
       shared.deepened.push({ section: data.section ?? "", text: data.text });
     }
+    syncPickHint(ctx, lastReply);
   };
 
   pi.on("session_start", (_event, ctx) => {
     patch();
     if (!isMainTui(ctx)) return;
     followSession(ctx);
+    if (!CLICKABLE) {
+      shared.linkClicks = () => ctx.ui.getLinkClicksAvailable?.() === true;
+      shared.rerender = timestamp => ctx.ui.rerenderMessage?.(timestamp);
+      shared.pressStatus = text => ctx.ui.setStatus?.(PRESS_STATUS_KEY, text);
+      // Links appear and vanish without a new reply: a loaded session's become pickable only after
+      // it loads, and `/stretch off` or a change of omp's settings redraws them open.
+      shared.replyDrawn = timestamp => {
+        if (hintReply?.timestamp === timestamp) syncPickHint(ctx, hintReply);
+      };
+      return;
+    }
     watchClicks();
     // Borrow the TUI handle from a throwaway widget: a click redraw happens outside any render cycle.
     ctx.ui.setWidget("omp-stretch", tui => {
@@ -687,13 +856,14 @@ export default function stretch(pi: ExtensionAPI): void {
     // A fork keeps the transcript on screen, so its replies must stay clickable.
     if (event.reason === "fork") return;
     shown.clear();
+    linkBlocks.clear();
     replies.clear();
   });
   // /tree moves to another branch of the same session: its answers and unreported notes differ.
   pi.on("session_tree", (_event, ctx) => {
     if (!isMainTui(ctx)) return;
     followSession(ctx);
-    for (const timestamp of [...shown.keys()]) redraw(timestamp);
+    redrawAll();
   });
   pi.on("session_shutdown", (_event, ctx) => {
     if (ctx.agent.kind === "main") unpatch();
@@ -702,6 +872,7 @@ export default function stretch(pi: ExtensionAPI): void {
   pi.on("message_end", (event, ctx) => {
     if (event.message.role !== "assistant") return;
     if (isMainTui(ctx)) lastPlain = plainVerdict(event.message) ?? lastPlain;
+    syncPickHint(ctx, event.message);
     if (!hasMarkup(event.message.content)) return;
     const message = event.message;
     replies.set(message.timestamp, message);
@@ -709,7 +880,8 @@ export default function stretch(pi: ExtensionAPI): void {
     const entry = shown.get(message.timestamp);
     if (entry !== undefined && entry.message !== message) {
       entry.message = message;
-      redraw(message.timestamp);
+      // omp's text renderer gets each block's index in the whole reply, so only the patch's links change.
+      if (CLICKABLE) redraw(message.timestamp);
     }
     if (!active(ctx)) return;
     message.content.forEach((block, i) => {
@@ -725,9 +897,11 @@ export default function stretch(pi: ExtensionAPI): void {
     // Another omp process may have changed the saved mode since this one's last prompt.
     const saved = readSavedMode();
     if (saved !== undefined) applyMode(saved);
-    const told = switched;
-    switched = undefined;
-    const mode = modeOf();
+    // Where no pick can land, the model writes no stretches: they could only show open.
+    const mode = pickableIn(ctx) ? modeOf() : "off";
+    // A mode the model was not prompted with last time: the switch note tells it.
+    const told = prompted !== undefined && prompted !== mode ? mode : undefined;
+    prompted = mode;
     const transition = promptTransition(event.systemPrompt, mode, told, pending, seen, lastPlain);
     const added = mode === "off" ? undefined : deepenNote(shared.deepened.splice(0));
     const content = [transition.content, added].filter(text => text !== undefined).join(" ") || undefined;

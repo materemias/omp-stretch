@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { guideFor, isPlainReply, linkedMarkdown, type LinkView, parse, PLAIN_REMINDER, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
+import { guideFor, isPlainReply, linkedMarkdown, type LinkView, parse, parseClick, PLAIN_REMINDER, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
 
 const closed: LinkView = { href: (op, index) => `u/${op}/${index}`, isOpen: () => false };
 
@@ -166,6 +166,19 @@ describe("linkedMarkdown structure", () => {
     expect(linkedMarkdown(parts, { ...closed, isOpen: () => true })).toBe(
       "Run it:\n\n```sh\nmake\n```\n\n[«](u/close/0)\n\n\nThen read the log.",
     );
+  });
+});
+
+describe("parseClick", () => {
+  test("reads a stretch link's path", () => {
+    expect(parseClick("open/1792/0/2")).toEqual({ op: "open", timestamp: 1792, blockIndex: 0, index: 2 });
+    expect(parseClick("deepen/5/1/0")?.op).toBe("deepen");
+  });
+
+  test("rejects what the model could write that is not a stretch link", () => {
+    for (const path of ["delete/all", "open/1/2", "open/1/2/3/4", "open/-1/0/0", "open/1/0/0?x", "open/1/0/1e3", ""]) {
+      expect(parseClick(path)).toBeUndefined();
+    }
   });
 });
 

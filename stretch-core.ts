@@ -497,6 +497,22 @@ function bare(word: string): string {
 
 export type LinkOp = "open" | "close" | "deepen";
 
+/** The link scheme stretch links use in a plain terminal, where omp routes their picks to this extension. */
+export const LINK_SCHEME = "cc-stretch";
+
+/** One stretch link picked: the op, the reply's timestamp, the block's index in it, and the stretch's index. */
+export type Click = { op: LinkOp; timestamp: number; blockIndex: number; index: number };
+
+/**
+ * The click a stretch link's path holds, `op/timestamp/block/index`; undefined for anything else. The
+ * model can write such a link too, so the path is parsed strictly.
+ */
+export function parseClick(path: string): Click | undefined {
+  const match = /^(open|close|deepen)\/(\d{1,16})\/(\d{1,6})\/(\d{1,6})$/.exec(path);
+  if (!match) return undefined;
+  return { op: match[1] as LinkOp, timestamp: Number(match[2]), blockIndex: Number(match[3]), index: Number(match[4]) };
+}
+
 export type LinkView = {
   href: (op: LinkOp, index: number) => string;
   isOpen: (key: string) => boolean;
