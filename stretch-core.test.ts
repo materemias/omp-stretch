@@ -157,6 +157,22 @@ describe("linkedMarkdown", () => {
     expect(at(0)).toBe("fails on cache. [«](u/close/0)");
     expect(at(1)).toBe("The CI build fails often on a stale cache. [«](u/close/0)");
   });
+
+  test("a link grows whole, anchored by its label's words", () => {
+    const parts = parse("{{The forum says so.|The [forum thread](https://x.io/t/1) says so, per the maintainers.}}");
+    const key = "The forum says so.";
+    for (const progress of [0, 0.3, 0.6, 1]) {
+      const drawn = linkedMarkdown(parts, { ...closed, isOpen: () => true, growing: { key, progress } });
+      expect(drawn).toContain("The [forum thread](https://x.io/t/1) says so");
+    }
+  });
+
+  test("a file's name stays in place as it grows into its path; a URL's last part does not anchor", () => {
+    const parts = parse("{{Edit core.ts.|Edit src/lib/core.ts, then https://x.io/core.ts.}}");
+    const at0 = linkedMarkdown(parts, { ...closed, isOpen: () => true, growing: { key: "Edit core.ts.", progress: 0 } });
+    expect(at0).toStartWith("Edit src/lib/core.ts");
+    expect(at0).not.toContain("https://");
+  });
 });
 
 describe("linkedMarkdown structure", () => {
