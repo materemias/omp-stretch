@@ -8,11 +8,16 @@
 
 local seq = 0
 
--- Stretch links read as quiet blue text: no underline, so real links keep theirs and stand apart; a
--- dotted underline shows on hover. « after an open one gets none. Tern's CSS engine has no dotted
--- text-decoration, so the dots are a bottom border, transparent until hover so the row never moves.
--- Tern underlines reply links per layout (reader: an inset box-shadow; console: text-decoration),
--- so each layout's rule, hover included, is overridden by a selector at least as specific.
+-- Stretch links read as quiet, muted blue text: no underline, so real links keep theirs and stand
+-- apart; a dotted underline shows on hover. « after an open one gets none. Tern's CSS engine has no
+-- dotted text-decoration, so the dots are a bottom border, transparent until hover so the row never
+-- moves. Tern underlines reply links per layout (reader: an inset box-shadow; console:
+-- text-decoration), so each layout's rule, hover included, is overridden by a selector at least as
+-- specific.
+--
+-- The color is omp's `mdExtensionLink`: the theme's value where Tern exposes it, else omp's derived
+-- default, 45% `mdLink` and 55% `text` mixed in sRGB, so a stretch has one color in Tern and in a
+-- plain terminal. Tern's text fallback is the theme's terminal foreground, as in omp.
 tern.css(
 	"links",
 	[[
@@ -22,6 +27,7 @@ tern.css(
 	box-shadow: none;
 	text-decoration: none;
 	border-bottom: 1.5px dotted transparent;
+	color: var(--omp-mdExtensionLink, color-mix(in srgb, var(--omp-mdLink, var(--accent-ink)) 45%, var(--omp-text, var(--tv-fg, var(--t1)))));
 }
 .md a[href*="cc-stretch.invalid/"][href*="/open/"]:hover,
 .sf-chat-console .sf-md .md a[href*="cc-stretch.invalid/"][href*="/open/"]:hover,

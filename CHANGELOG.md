@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+- In Tern, stretch links take a muted link color, so they stand apart from links that open a page. It matches what omp draws them with in a plain terminal once omp has its `mdExtensionLink` theme color.
+
 ## 0.4.1 (2026-11-12)
 
 ### Fixes
