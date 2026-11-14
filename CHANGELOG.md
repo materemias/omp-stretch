@@ -6,6 +6,10 @@
 
 - In Tern, stretch links take a muted link color, so they stand apart from links that open a page. It matches what omp draws them with in a plain terminal once omp has its `mdExtensionLink` theme color.
 
+### Fixes
+
+- In Tern, a markdown link whose URL holds parentheses, such as a Wikipedia page, or that has a title also arrives whole as its stretch opens.
+
 ## 0.4.1 (2026-11-12)
 
 ### Fixes

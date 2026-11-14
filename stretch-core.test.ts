@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { guideFor, isPlainReply, linkedMarkdown, type LinkView, parse, parseClick, PLAIN_REMINDER, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
+import { guideFor, isPlainReply, lengthOf, linkedMarkdown, type LinkView, parse, parseClick, PLAIN_REMINDER, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
 
 const closed: LinkView = { href: (op, index) => `u/${op}/${index}`, isOpen: () => false };
 
@@ -165,6 +165,28 @@ describe("linkedMarkdown", () => {
       const drawn = linkedMarkdown(parts, { ...closed, isOpen: () => true, growing: { key, progress } });
       expect(drawn).toContain("The [forum thread](https://x.io/t/1) says so");
     }
+  });
+
+  test("a link whose target holds parentheses or a title grows whole", () => {
+    for (const link of ["[thread](https://en.wikipedia.org/wiki/A_(b))", '[thread](https://example.com "the title")']) {
+      const parts = parse(`{{The thread says so.|The ${link} says so, per the maintainers.}}`);
+      const key = "The thread says so.";
+      for (const progress of [0, 0.3, 0.6, 1]) {
+        const drawn = linkedMarkdown(parts, { ...closed, isOpen: () => true, growing: { key, progress } });
+        expect(drawn).toContain(`The ${link} says so`);
+      }
+    }
+  });
+
+  test("inside inline code, and for an unbalanced target, links split as they did before titles and parentheses", () => {
+    // A titled link in code grows word by word, as before; outside code it is one token.
+    const inCode = parse('{{Run it.|Run `[x](https://example.com "the title")` it.}}');
+    const growing = { ...closed, isOpen: () => true, growing: { key: "Run it.", progress: 0.2 } };
+    expect(linkedMarkdown(inCode, growing)).toBe("Run `[x](https://example.com it. [«](u/close/0)");
+    expect(lengthOf(['[x](https://example.com "the title")'])).toBe(1);
+    expect(lengthOf(["`[x](https://en.wikipedia.org/wiki/A_(b))`"])).toBe(3);
+    expect(lengthOf(["`[x](a)` and [y](https://en.wikipedia.org/wiki/A_(b))"])).toBe(5);
+    expect(lengthOf(["see [x](a(b) now"])).toBe(3);
   });
 
   test("a file's name stays in place as it grows into its path; a URL's last part does not anchor", () => {
