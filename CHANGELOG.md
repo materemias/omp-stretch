@@ -6,30 +6,30 @@
 
 ### Features
 
-- In Tern, stretch links take a muted link color, so they stand apart from links that open a page. It matches what omp draws them with in a plain terminal once omp has its `mdExtensionLink` theme color.
+- In Tern, stretch links use omp's muted extension-link color.
 
 ### Fixes
 
-- In Tern, a markdown link whose URL holds parentheses, such as a Wikipedia page, or that has a title also arrives whole as its stretch opens.
+- In Tern, a markdown link with parentheses in its URL or a title grows whole.
 
 ## 0.4.1 (2026-11-12)
 
 ### Fixes
 
-- In Tern, a markdown link inside a stretch arrives whole as the stretch opens, instead of a word at a time with its markup showing, and a file name the short form holds stays in place as it grows into its path.
+- In Tern, a markdown link in a stretch grows whole, and a file name stays in place as it grows into its path.
 
 ## 0.4.0 (2026-11-06)
 
 ### Features
 
-- Stretches work in plain terminals on omp 18.17.0 or newer: press omp's link hint key (`app.links.hint`, `Alt+O` by default) and type a link's letter, or click it with omp's mouse mode on, to open a stretch, close it with `«`, or ask for more with ✦. Press the key twice to pick stretches that have scrolled off screen. The footer shows the key while the last reply has stretches. Needs **Tools → Extensions → Extension Reply Renderers** on; `/stretch status` lists what's needed.
+- Stretches work in plain terminals on omp 18.17.0+ through omp's link hint key or mouse. Needs **Extension Reply Renderers** on.
 - After a long reply without stretches, the next message reminds the model to use them. Code blocks don't count toward long.
 - `/stretch section` shows the model a worked example with one stretch per section.
 
 ### Fixes
 
-- A stretch whose short form is only punctuation such as a period, or empty, opens from the words of its sentence before it, and the read note names it by them. With no such words, it shows open.
-- Pressing ✦ again on a stretch that already has a ✦ answer adds the new answer after the first one, instead of failing with a warning.
+- A stretch whose short form is only punctuation opens from the words of its sentence.
+- Pressing ✦ again adds a second answer instead of failing.
 - A gist written before its stretch shows once even when it holds a `snake_case` word.
 - A ✦ answer after a long form ending in a table starts its own paragraph, instead of being dropped as an extra table cell.
 
@@ -37,7 +37,7 @@
 
 ### Fixes
 
-- Stretches open and close from a Tern window connected to omp's machine through Tern remoting, instead of opening a browser tab. The Tern plugin must be installed on both machines.
+- Stretches open from a Tern window remoted to omp's machine. Install the Tern plugin on both machines.
 
 ## 0.3.1 (2026-10-25)
 
@@ -50,7 +50,7 @@
 
 ### Features
 
-- Experimental `/stretch section` mode: each section under a heading shows one line, and opening it shows the section in dense form.
+- Experimental `/stretch section` mode folds each heading's section to one line.
 - `advisor.md` teaches omp's advisor to read stretch markup instead of flagging it as duplicated text.
 
 ### Fixes
@@ -88,7 +88,7 @@ First release.
 
 ### Features
 
-- The model writes `{{short|long}}` stretches; in Tern each short form is a link that grows its long form in place, and `«` collapses it.
+- The model writes `{{short|long}}` stretches; in Tern a short form grows its long form in place, and `«` closes it.
 - Nested stretches open one level at a time.
 - The next prompt carries a hidden note listing the stretches you opened and the ones you didn't.
 - Streaming shows short forms only; aborted stretches and multi-line short forms are drawn open.
@@ -109,6 +109,6 @@ First release.
 
 ### Known limitations
 
-- omp-stretch patches omp's internal `AssistantMessageComponent.updateContent`, so any omp release can break it. It needs omp 18.11.0 or newer and turns itself off when the method is missing. The supported API is in [#16238](https://github.com/can1357/oh-my-pi/pull/16238), [#16239](https://github.com/can1357/oh-my-pi/pull/16239) and [#16476](https://github.com/can1357/oh-my-pi/pull/16476), not yet merged.
+- omp-stretch patches an omp internal, so an omp release can break it; it needs omp 18.11.0+ and turns off if that's gone.
 - Clicks work only in Tern; elsewhere stretches are drawn open.
 - Open stretches live in memory and close when omp restarts.
