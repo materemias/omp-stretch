@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { guideFor, isPlainReply, lengthOf, linkedMarkdown, type LinkView, parse, parseClick, PLAIN_REMINDER, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
+import { clickRoot, guideFor, isPlainReply, lengthOf, linkedMarkdown, type LinkView, parse, parseClick, PLAIN_REMINDER, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
 
 const closed: LinkView = { href: (op, index) => `u/${op}/${index}`, isOpen: () => false };
 
@@ -224,6 +224,16 @@ describe("parseClick", () => {
     for (const path of ["delete/all", "open/1/2", "open/1/2/3/4", "open/-1/0/0", "open/1/0/0?x", "open/1/0/1e3", ""]) {
       expect(parseClick(path)).toBeUndefined();
     }
+  });
+});
+
+describe("clickRoot", () => {
+  // The Tern plugin's window.luau and host.luau walk the same chain; these pin its order.
+  test("XDG_RUNTIME_DIR, then LOCALAPPDATA, then /tmp per user; empty values are skipped", () => {
+    expect(clickRoot({ XDG_RUNTIME_DIR: "/run/user/1000", LOCALAPPDATA: "C:\\L", USER: "u" })).toBe("/run/user/1000/omp-stretch");
+    expect(clickRoot({ XDG_RUNTIME_DIR: "", LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local" })).toBe("C:\\Users\\u\\AppData\\Local/omp-stretch");
+    expect(clickRoot({ LOCALAPPDATA: "", USER: "u" })).toBe("/tmp/omp-stretch-u");
+    expect(clickRoot({})).toBe("/tmp/omp-stretch-");
   });
 });
 

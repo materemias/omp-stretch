@@ -69,9 +69,15 @@ tern.route.link(function(link: LinkRequest, cx: WindowCx): RouteDecision?
 	if cx.hosts:current().kind == "remote" then
 		return { block = "omp-stretch.click", args = { pid, action } }
 	end
-	-- Same folder as stretch.ts: $XDG_RUNTIME_DIR/omp-stretch, else one per user in /tmp.
-	local runtime = tern.getenv("XDG_RUNTIME_DIR")
-	local root = if runtime and runtime ~= "" then runtime .. "/omp-stretch" else "/tmp/omp-stretch-" .. (tern.getenv("USER") or "")
+	-- Same folder as clickRoot in stretch-core.ts (which says why) and host.luau: keep all three in lockstep.
+	local root = "/tmp/omp-stretch-" .. (tern.getenv("USER") or "")
+	for _, name in { "XDG_RUNTIME_DIR", "LOCALAPPDATA" } do
+		local value = tern.getenv(name)
+		if value and value ~= "" then
+			root = value .. "/omp-stretch"
+			break
+		end
+	end
 	local dir = root .. "/" .. pid
 	if tern.fs.exists(dir) then
 		seq += 1

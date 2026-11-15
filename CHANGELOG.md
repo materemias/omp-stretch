@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Features
+
+- `/stretch status` shows the folder Tern clicks land in.
+
+### Fixes
+
+- On Windows, clicking a stretch in Tern works in omp sessions started on any drive ([#1](https://github.com/materemias/omp-stretch/issues/1)).
+
 ## 0.5.0 (2026-11-15)
 
 ### Features

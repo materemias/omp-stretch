@@ -7,6 +7,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { clickRoot } from "../stretch-core.ts";
 import { LIGHT_QUESTION, QUESTION } from "./script.ts";
 
 const REPO = resolve(import.meta.dir, "..");
@@ -18,7 +19,7 @@ const SIZE = [880, 620] as const;
 // Font 16 scales Tern's chrome too: these are its title bar and bottom bar, which compose.py drops.
 const FONT = 16;
 const CROP = [6, 48, SIZE[0] - 6, SIZE[1] - 34] as const;
-const CLICKS = join(process.env.XDG_RUNTIME_DIR ?? "/tmp", "omp-stretch");
+const CLICKS = clickRoot(process.env);
 
 rmSync(WORK, { recursive: true, force: true });
 const agent = join(WORK, "home/.omp/agent");

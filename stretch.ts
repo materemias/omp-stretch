@@ -26,6 +26,7 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import type { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import {
   canDeepen,
+  clickRoot,
   type DeepenAnswer,
   deepenNote,
   deepenPrompt,
@@ -78,12 +79,7 @@ const DEEPEN_TYPE = "omp-stretch.deepen";
 /** Output tokens a ✦ press may use, reasoning included, on transports that honour a cap. */
 const DEEPEN_MAX_TOKENS = 1500;
 const HREF = `https://cc-stretch.invalid/${process.pid}/`;
-// Without XDG_RUNTIME_DIR, one folder per user in /tmp, so one user's 0700 folder never locks out another.
-// The Tern plugin builds the same path.
-const CLICK_ROOT = process.env.XDG_RUNTIME_DIR
-  ? join(process.env.XDG_RUNTIME_DIR, "omp-stretch")
-  : `/tmp/omp-stretch-${process.env.USER ?? ""}`;
-const CLICK_DIR = join(CLICK_ROOT, String(process.pid));
+const CLICK_DIR = join(clickRoot(process.env), String(process.pid));
 const CLICKABLE = process.env.TERN_PANE !== undefined;
 const FRAME_MS = 33;
 
@@ -661,8 +657,8 @@ function statusText(): string {
         : "not patched (replies show as omp draws them)";
   const clicks = CLICKABLE
     ? shared.watcher
-      ? "on (Tern; needs the omp-stretch Tern plugin)"
-      : "off: click watcher not running"
+      ? `on (Tern; needs the omp-stretch Tern plugin; clicks land in ${CLICK_DIR})`
+      : `off: click watcher not running on ${CLICK_DIR}`
     : linkApi && pickable()
       ? "on: the link hint key (app.links.hint) tags each stretch to pick, or click one with tui.mouse on"
       : `off: ${PICK_HELP}; stretches drawn open`;

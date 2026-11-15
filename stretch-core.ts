@@ -580,6 +580,19 @@ export function parseClick(path: string): Click | undefined {
   return { op: match[1] as LinkOp, timestamp: Number(match[2]), blockIndex: Number(match[3]), index: Number(match[4]) };
 }
 
+/**
+ * The folder Tern drops stretch clicks into, one subfolder per omp process. tern-plugin/window.luau and
+ * host.luau build the same path from the same variables: any difference silently drops clicks. The
+ * fallbacks are absolute wherever omp normally runs: `LOCALAPPDATA` is always set on Windows and
+ * practically never elsewhere, where `/tmp` gets one folder per user, so one user's 0700 folder never
+ * locks out another. (A root-relative `/tmp` on Windows would resolve against each process's current drive.)
+ */
+export function clickRoot(env: Record<string, string | undefined>): string {
+  if (env.XDG_RUNTIME_DIR) return `${env.XDG_RUNTIME_DIR}/omp-stretch`;
+  if (env.LOCALAPPDATA) return `${env.LOCALAPPDATA}/omp-stretch`;
+  return `/tmp/omp-stretch-${env.USER ?? ""}`;
+}
+
 export type LinkView = {
   href: (op: LinkOp, index: number) => string;
   isOpen: (key: string) => boolean;
