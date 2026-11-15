@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.1 (2026-11-15)
+
 ### Features
 
 - `/stretch status` shows the folder Tern clicks land in.
