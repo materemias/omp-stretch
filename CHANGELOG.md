@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- A sentence the model wrapped in `{{…}}` without a short form opens from the words before it instead of showing raw braces.
+
 ## 0.5.2 (2026-11-15)
 
 ### Features

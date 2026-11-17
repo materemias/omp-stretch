@@ -89,6 +89,7 @@ A press is a model call. It reuses the conversation's prompt cache and is capped
 - Which stretches are open is forgotten when omp restarts.
 - `/btw` answers come plain, since that panel can't open stretches.
 - A literal placeholder without a pipe, such as `{{name}}`, stays unchanged. Put template expressions containing pipes in code spans so they are not mistaken for stretches.
+- A whole sentence written without a pipe, such as `Done. {{It took a minute.}}`, is a long form the model wrote without its short form: it opens from the words before it.
 - omp's "Copy answer" copies the reply as drawn: closed stretches stay short, and their links only work in this omp.
 
 MIT. The parser, the growth logic and the guide are ported from cc-stretch (MIT).

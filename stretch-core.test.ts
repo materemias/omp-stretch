@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clickRoot, guideFor, isPlainReply, lengthOf, linkedMarkdown, type LinkView, parse, parseClick, PLAIN_REMINDER, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
+import { clickRoot, DEEPEN, guideFor, isPlainReply, KEY_SEPARATOR, lengthOf, linkedMarkdown, type LinkView, parse, parseClick, PLAIN_REMINDER, promptTransition, readNote, spliceAnswer, streamingView, stretches, withAnswers, writeOpen } from "./stretch-core.ts";
 
 const closed: LinkView = { href: (op, index) => `u/${op}/${index}`, isOpen: () => false };
 
@@ -38,6 +38,24 @@ describe("parse", () => {
       expect(writeOpen(parse(text))).toBe(text);
       expect(linkedMarkdown(parse(text), closed)).toBe(text);
     }
+  });
+
+  test("a sentence written without its short form opens from the words before it", () => {
+    const text = "2. No automatic backup {{(the `hindsight-data` volume).}}\n3. Not checked. {{My test reply went into a thread.}}";
+    expect(linkedMarkdown(parse(text), closed)).toBe("2. [No automatic backup](u/open/0)\n3. [Not checked.](u/open/1)");
+    expect(writeOpen(parse(text))).toBe(
+      "2. No automatic backup (the `hindsight-data` volume).\n3. Not checked. My test reply went into a thread.",
+    );
+    for (const text of ["{{ user.name }}", "{{#if done}}", "{{name.}}", "{{a b}}"]) expect(writeOpen(parse(text))).toBe(text);
+  });
+
+  test("a sentence written without its short form takes ✦ answers", () => {
+    const block = "Done. {{It took a minute.}}";
+    const [stretch] = stretches(parse(block));
+    const spliced = spliceAnswer(block, [], stretch!.key, "More detail.");
+    expect(spliced?.key).toBe(`${stretch!.key}${KEY_SEPARATOR}${DEEPEN}`);
+    const both = [{ key: stretch!.key, text: "One." }, { key: stretch!.key, text: "Two." }];
+    expect(writeOpen(parse(withAnswers(block, both)))).toBe("Done. It took a minute. ✦ One. ✦ Two.");
   });
 
   test("fully open fallback expands valid stretches and preserves nested placeholders", () => {
