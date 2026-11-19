@@ -2,9 +2,17 @@
 
 ## Unreleased
 
+### Features
+
+- Other packages can import the parser as `omp-stretch/stretch-core`, as tern-awui does.
+
 ### Fixes
 
-- A sentence the model wrapped in `{{…}}` without a short form opens from the words before it instead of showing raw braces.
+- A sentence the model wrapped in `{{…}}` with no short form opens from the words before it.
+
+### Docs
+
+- "Works well with" in the README covers tern-awui, omp-compact and CodexBar AgentView.
 
 ## 0.5.2 (2026-11-15)
 

@@ -77,9 +77,13 @@ When a stretch and every stretch inside it are open, it ends in `✦ «`. Pick �
 
 A press is a model call. It reuses the conversation's prompt cache and is capped at 1,500 output tokens where the model allows a cap; on Codex, Cursor and budget-thinking models with thinking on, it runs uncapped.
 
-## On your phone
+## Works well with
 
-[tern-awui](https://github.com/materemias/tern-awui), the phone and browser companion for omp in Tern, shows the same stretches as links. Open one on the phone and it opens in the Tern pane too, and the reverse; ✦ works from the phone as well, with the pane's model. The model's read note counts what you opened on either side. Each app works without the other.
+Each of these runs fine on its own, and none needs setup for the others.
+
+- **[tern-awui](https://github.com/materemias/tern-awui)**, the phone and browser companion for omp in Tern, shows the same stretches as links. Open one on the phone and it opens in the Tern pane too, and the reverse; ✦ works from the phone as well, with the pane's model. The model's read note counts what you opened on either side. tern-awui draws them with this repo's parser, imported as `omp-stretch/stretch-core`, so both sides name each stretch alike.
+- **[omp-compact](https://github.com/arksdev/omp-compact)** folds omp's tool log to one line per action. With the reply opening at its gist too, a long run reads in a few lines.
+- **[CodexBar AgentView](https://github.com/materemias/codexbar-agentview)**, a Tern dashboard of your agent sessions, shows a reply's gist in its session previews instead of the raw `{{short|long}}` markup.
 
 ## Limits
 
