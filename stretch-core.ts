@@ -4,6 +4,11 @@
 // A reply is markdown in which `{{short|long}}` marks a stretch: the reader sees `short`, and
 // opening it puts `long` in its place. `long` may hold further stretches. Code spans and fences are
 // copied as written, so braces in code never open a stretch.
+//
+// tern-awui imports this file as `omp-stretch/stretch-core` (the `exports` map in package.json) to
+// draw the same stretches in the browser, so it must stay free of imports. The phone and the Tern
+// pane sync open stretches by key: keep key naming (short form, `KEY_SEPARATOR`, `~2` for repeats)
+// stable, or change tern-awui's key tests (web/stretch.test.ts) and its dependency pin with it.
 
 /**
  * How heavily stretches are used: `light` keeps a sentence or two per paragraph in view, `dense` one
