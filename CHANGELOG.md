@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 (2026-11-19)
+
 ### Features
 
 - Other packages can import the parser as `omp-stretch/stretch-core`, as tern-awui does.
