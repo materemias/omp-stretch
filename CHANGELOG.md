@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 (2026-11-21)
+
 ### Features
 
 - `/stretch update` installs a newer release, which omp announces once.
