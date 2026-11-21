@@ -148,12 +148,13 @@ async function installed(exec: Exec): Promise<{ path: string; version: string }>
  * upgrade fails, while a failed relink after it only adds a line.
  */
 export async function installUpdate(exec: Exec): Promise<string> {
-  await installed(exec);
+  const before = await installed(exec);
   await run(exec, OMP, ["plugin", "marketplace", "update", MARKETPLACE]);
   await run(exec, OMP, ["plugin", "upgrade", PLUGIN_ID]);
   const now = await installed(exec);
+  // An install this process has not loaded yet, from this upgrade or an earlier one, needs a restart.
   const lines = [
-    now.version === CURRENT
+    now.version === before.version && now.version === CURRENT
       ? `omp-stretch ${CURRENT} is already the latest.`
       : `omp-stretch ${now.version} is installed; restart omp to load it.`,
   ];
