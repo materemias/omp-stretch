@@ -52,7 +52,17 @@ If you use omp's advisor, add this line to `~/.omp/agent/WATCHDOG.md` so it know
 @~/.omp/plugins/node_modules/omp-stretch/advisor.md
 ```
 
-To update, run `omp plugin upgrade omp-stretch@omp-stretch`. In Tern, run the `tern plugin link` line again too: Tern remembers the versioned folder the link pointed to.
+## Updates
+
+Once a day at most, omp-stretch asks GitHub for its latest release. A newer one shows a single notice in omp, once per version; after that, `/stretch status` keeps naming it. Run `/stretch update` to install it, then restart omp. It refreshes the marketplace, upgrades the plugin and, in Tern, points the Tern plugin link at the new copy, which Tern would otherwise keep on the old one. By hand, that is `omp plugin marketplace update omp-stretch`, `omp plugin upgrade omp-stretch@omp-stretch` and the `tern plugin link` line above.
+
+On a machine with only the Tern plugin (the window side of remoting), the plugin checks the same way and shows a toast once per version. Update it with:
+
+```sh
+tern plugin install github.com/materemias/omp-stretch/tern-plugin --force
+```
+
+Set `OMP_STRETCH_UPDATE_CHECK=0` in omp's environment to turn the omp check off. Only a copy omp installed checks; a checkout you linked yourself does not.
 
 ## Modes
 

@@ -53,6 +53,7 @@ import {
   withAnswers,
   writeOpen,
 } from "./stretch-core.ts";
+import { CURRENT, checkForUpdate, checksEnabled, errorText, installUpdate, knownUpdate } from "./update.ts";
 
 // An internal omp module, served to extensions only from omp 18.11.0. On an older or restructured
 // omp, Tern gets nothing: no guide, so the model writes no stretches it cannot show. A plain terminal
@@ -160,6 +161,8 @@ type Shared = {
   wrote?: (written: { id: string; short: string }[]) => void;
   /** This import's click reader: the watcher outlives a reload, the reader must not. */
   drain?: () => void;
+  /** When this process may next look for a newer release (update.ts throttles GitHub to once a day). */
+  nextUpdateCheck?: number;
 };
 
 /**
@@ -662,11 +665,13 @@ function statusText(): string {
     : linkApi && pickable()
       ? "on: the link hint key (app.links.hint) tags each stretch to pick, or click one with tui.mouse on"
       : `off: ${PICK_HELP}; stretches drawn open`;
+  const update = knownUpdate();
   return [
     `Stretchtext in this omp: ${modeOf()}${pending}`,
     `Saved for every session: ${savedText}`,
     `Reply drawing: ${drawing}`,
     `Clicks: ${clicks}`,
+    `Version: ${CURRENT}${update ? `; ${update} is out: /stretch update` : ""}`,
   ].join("\n");
 }
 
@@ -746,19 +751,36 @@ export default function stretch(pi: ExtensionAPI): void {
     redrawAll();
   };
 
+  /**
+   * In the background, at most hourly per process: a newer release no omp process announced yet
+   * gets one notice. A long-running omp hears of a release on its first prompt after the daily check.
+   */
+  const announceUpdate = (ctx: ExtensionContext) => {
+    const now = Date.now();
+    if (now < (shared.nextUpdateCheck ?? 0) || !checksEnabled()) return;
+    shared.nextUpdateCheck = now + 60 * 60 * 1000;
+    void checkForUpdate()
+      .then(latest => {
+        if (latest) ctx.ui.notify(`omp-stretch ${latest} is out (you have ${CURRENT}): /stretch update`, "info");
+      })
+      .catch(() => undefined);
+  };
+
   pi.registerCommand("stretch", {
-    description: "Stretchtext replies for every omp session: /stretch dense | light | section | off | status",
+    description: "Stretchtext replies for every omp session: /stretch dense | light | section | off | status | update",
     getArgumentCompletions: prefix => {
       const typed = prefix.trim().toLowerCase();
       const modes = MODE_CHOICES.filter(choice => choice.value.startsWith(typed)).map(choice => ({
         ...choice,
         label: choice.value === modeOf() ? `${choice.value} (current)` : choice.value,
       }));
-      return "status".startsWith(typed)
-        ? [...modes, { value: "status", label: "status", description: "Show this session's mode, the saved mode, and whether clicks work" }]
-        : modes;
+      const extra = [
+        { value: "status", label: "status", description: "Show this session's mode, the saved mode, and whether clicks work" },
+        { value: "update", label: "update", description: "Install the latest omp-stretch release" },
+      ];
+      return [...modes, ...extra.filter(choice => choice.value.startsWith(typed))];
     },
-    handler: (args, ctx) => {
+    handler: async (args, ctx) => {
       const arg = args.trim().toLowerCase();
       if (isMode(arg)) {
         // Saved first: the next prompt syncs every process to the saved mode, this one included.
@@ -772,8 +794,16 @@ export default function stretch(pi: ExtensionAPI): void {
       } else if (arg === "status") {
         ctx.ui.notify(statusText(), "info");
         return;
+      } else if (arg === "update") {
+        ctx.ui.notify("Updating omp-stretch…", "info");
+        try {
+          ctx.ui.notify(await installUpdate((command, argv) => pi.exec(command, argv, { timeout: 120_000 })), "info");
+        } catch (error) {
+          ctx.ui.notify(`omp-stretch update failed: ${errorText(error)}`, "warning");
+        }
+        return;
       } else if (arg !== "") {
-        ctx.ui.notify("Usage: /stretch dense | light | section | off | status", "warning");
+        ctx.ui.notify("Usage: /stretch dense | light | section | off | status | update", "warning");
         return;
       }
       const where = pickableIn(ctx) ? "" : " (here stretches are drawn open and never requested: see /stretch status)";
@@ -846,6 +876,7 @@ export default function stretch(pi: ExtensionAPI): void {
     patch();
     if (!isMainTui(ctx)) return;
     followSession(ctx);
+    announceUpdate(ctx);
     if (!CLICKABLE) {
       shared.linkClicks = () => ctx.ui.getLinkClicksAvailable?.() === true;
       shared.rerender = timestamp => ctx.ui.rerenderMessage?.(timestamp);
@@ -910,6 +941,7 @@ export default function stretch(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", (event, ctx) => {
     if (!isMainTui(ctx)) return;
+    announceUpdate(ctx);
     // Another omp process may have changed the saved mode since this one's last prompt.
     const saved = readSavedMode();
     if (saved !== undefined) applyMode(saved);

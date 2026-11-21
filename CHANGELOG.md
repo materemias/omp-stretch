@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Features
+
+- `/stretch update` installs a newer release, which omp announces once.
+- A Tern-only install toasts once when a newer release is out.
+
 ## 0.6.0 (2026-11-19)
 
 ### Features
