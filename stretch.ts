@@ -2,12 +2,13 @@
 // chat shows each short form as a link, and picking it grows it in place. The session keeps the
 // model's markup as written.
 //
-// In Tern, this patches AssistantMessageComponent.updateContent to rewrite the displayed text, and
-// clicks reach omp through the `omp-stretch` Tern plugin (tern-plugin/), which claims links to
-// cc-stretch.invalid and drops each as a file in this process's click directory. In a plain terminal
-// an assistant text renderer draws `cc-stretch:` links that omp lets the reader pick by hint tag or
-// click and hands to `link_activate`; the patch only covers omp's renderers being off. Where no pick
-// can land, stretches are drawn open and the model is not asked to write them.
+// In Tern, clicks reach omp through the `omp-stretch` Tern plugin (tern-plugin/), which claims links
+// to cc-stretch.invalid and drops each as a file in this process's click directory. Up to omp 19.1
+// Tern draws those links by patching AssistantMessageComponent.updateContent; from omp 19.2, whose
+// reactive TUI has no such class, an assistant text renderer draws them, as it does everywhere else.
+// In a plain terminal that renderer draws `cc-stretch:` links that omp lets the reader pick by hint
+// tag or click and hands to `link_activate`; the patch only covers omp's renderers being off. Where
+// no pick can land, stretches are drawn open and the model is not asked to write them.
 import {
   type FSWatcher,
   mkdirSync,
@@ -22,7 +23,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, settings as ompSettings } from "@oh-my-pi/pi-coding-agent";
 import type { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import {
   canDeepen,
@@ -55,9 +56,8 @@ import {
 } from "./stretch-core.ts";
 import { CURRENT, checkForUpdate, checksEnabled, errorText, installUpdate, knownUpdate } from "./update.ts";
 
-// An internal omp module, served to extensions only from omp 18.11.0. On an older or restructured
-// omp, Tern gets nothing: no guide, so the model writes no stretches it cannot show. A plain terminal
-// carries on through omp's extension API.
+// An internal omp module, served to extensions from omp 18.11.0 until the reactive TUI of 19.2
+// removed it. Without it, Tern draws through omp's extension text renderers instead.
 const Component: typeof AssistantMessageComponent | undefined = await import(
   "@oh-my-pi/pi-tui/chat/assistant-message"
 ).then(
@@ -67,6 +67,17 @@ const Component: typeof AssistantMessageComponent | undefined = await import(
       : undefined,
   () => undefined,
 );
+
+// omp's handle on `extensionRenderers.assistantText`, internal like the module above (from omp
+// 18.17.0): omp calls extension text renderers only while it is on, and this is the value it reads.
+const textRenderersSetting = await import("@oh-my-pi/pi-coding-agent/extensibility/settings").then(
+  module =>
+    typeof module.cfgExtensionAssistantTextRenderers?.get === "function" ? module.cfgExtensionAssistantTextRenderers : undefined,
+  () => undefined,
+);
+
+/** Whether omp draws replies through extension text renderers. */
+const textRenderersOn = () => textRenderersSetting?.get(ompSettings) === true;
 
 // omp's key hints, to name the link hint key in the footer; internal, so it may be missing.
 const linkHintKey: (() => string) | undefined = await import("@oh-my-pi/pi-tui/chrome/keybinding-hints").then(
@@ -82,6 +93,8 @@ const DEEPEN_MAX_TOKENS = 1500;
 const HREF = `https://cc-stretch.invalid/${process.pid}/`;
 const CLICK_DIR = join(clickRoot(process.env), String(process.pid));
 const CLICKABLE = process.env.TERN_PANE !== undefined;
+/** Tern drawing through the patch (omp up to 19.1); otherwise omp's text renderer draws, in Tern too. */
+const TERN_PATCH = CLICKABLE && Component !== undefined;
 const FRAME_MS = 33;
 
 /** A text block of one reply: `${message.timestamp}.${contentIndex}`, the index in the whole reply. */
@@ -102,9 +115,9 @@ type Shared = {
   /** Final replies with stretches on screen, by timestamp: the whole reply and the components drawing it. */
   shown: Map<number, { message: AssistantMessage; components: WeakRef<AssistantMessageComponent>[] }>;
   /**
-   * Outside Tern, the text of each block the text renderer drew, as written. Picks resolve against it,
-   * since a block sealed at a tool call draws links before its reply is in `shown`, and its ids say
-   * which replies a mode change redraws, with or without the patch.
+   * Where the text renderer draws, the text of each block it drew, as written. Picks resolve against
+   * it, since a block sealed at a tool call draws links before its reply is in `shown`, and its ids
+   * say which replies a mode change redraws, with or without the patch.
    */
   renderedBlocks: Map<BlockId, string>;
   /**
@@ -202,7 +215,7 @@ delete (state as { produced?: unknown }).produced;
 const shared = state as Shared;
 const { openKeys, seen, shown, renderedBlocks, segments, replies, sources, answers, running } = shared;
 const modeOf = (): Mode => shared.mode ?? "dense";
-/** Outside Tern: whether omp lets the reader pick the links the text renderer draws. */
+/** Outside Tern: whether omp lets the reader pick the links the text renderer draws. Tern takes clicks through its plugin. */
 const pickable = () => shared.linkClicks?.() === true;
 /**
  * Set at load when this omp has extension text renderers and link schemes. Picks need 18.17.0: from
@@ -292,12 +305,12 @@ function noteDrawn(timestamp: number): void {
 }
 
 /**
- * The plain-terminal drawing, as omp's assistant text renderer: short forms while streaming, then
- * links of the scheme this extension claimed, or long forms with stretches off or where no pick can
- * land. Blocks the patch already drew open have no markup left to find.
+ * omp's assistant text renderer: short forms while streaming, then links (to cc-stretch.invalid
+ * for the Tern plugin, or of the scheme this extension claimed), or long forms with stretches off or
+ * where no pick can land. Blocks the patch already drew open have no markup left to find.
  */
 const renderText: TextRenderer = ({ message, contentIndex, text, streaming }) => {
-  if (CLICKABLE) return undefined;
+  if (TERN_PATCH) return undefined;
   noteDrawn(message.timestamp);
   if (!text.includes("{{")) return undefined;
   const id: BlockId = `${message.timestamp}.${contentIndex}`;
@@ -305,8 +318,9 @@ const renderText: TextRenderer = ({ message, contentIndex, text, streaming }) =>
   if (stretches(parts).length === 0) return undefined;
   if (streaming) return streamingView(parts);
   renderedBlocks.set(id, text);
-  if (shared.mode === "off" || !pickable()) return writeOpen(parts);
-  return drawLinks(parts, id, (op, index) => `${LINK_SCHEME}:${op}/${message.timestamp}/${contentIndex}/${index}`);
+  if (shared.mode === "off" || (!CLICKABLE && !pickable())) return writeOpen(parts);
+  const prefix = CLICKABLE ? HREF : `${LINK_SCHEME}:`;
+  return drawLinks(parts, id, (op, index) => `${prefix}${op}/${message.timestamp}/${contentIndex}/${index}`);
 };
 
 type UpdateContent = AssistantMessageComponent["updateContent"];
@@ -334,11 +348,11 @@ const wrapper: UpdateContent = function (this: AssistantMessageComponent, messag
 };
 
 function patch(): void {
-  if (!Component) return;
-  // A reload imports this file again while the patch stays: hand out this import's bridge, and
-  // install this import's wrapper, so drawing uses its view and not the previous import's.
+  // A reload imports this file again while the patch stays: hand out this import's bridge and click
+  // reader, and install this import's wrapper, so drawing uses its view and not the previous import's.
   shared.bridge = bridge;
   shared.drain = drainClicks;
+  if (!Component) return;
   const proto = Component.prototype;
   if (proto.updateContent === wrapper) return;
   shared.original ??= proto.updateContent;
@@ -362,7 +376,7 @@ function unpatch(): void {
 
 function redraw(timestamp: number): void {
   // omp redraws the reply wherever it is drawn: the viewport, the scrollback, or the link browser.
-  if (!CLICKABLE) {
+  if (!TERN_PATCH) {
     shared.rerender?.(timestamp);
     return;
   }
@@ -388,10 +402,10 @@ function redraw(timestamp: number): void {
 function redrawAll(): void {
   const drawn = new Set<number>();
   shared.drawnNow = drawn;
-  // A block id starts with its reply's timestamp. Outside Tern the renderer records the replies it
-  // drew with links; the patch, when present, also records those it drew open.
+  // A block id starts with its reply's timestamp. The text renderer records the replies it drew
+  // with links; the patch, when present, also records those it drew open.
   const timestamps = new Set(shown.keys());
-  if (!CLICKABLE) for (const id of renderedBlocks.keys()) timestamps.add(Number.parseInt(id, 10));
+  if (!TERN_PATCH) for (const id of renderedBlocks.keys()) timestamps.add(Number.parseInt(id, 10));
   try {
     for (const timestamp of [...timestamps]) {
       if (!drawn.has(timestamp)) redraw(timestamp);
@@ -653,15 +667,21 @@ function statusText(): string {
   const pending = saved !== undefined && saved !== modeOf() ? `; switches to ${saved} on the next message` : "";
   const patched = Component?.prototype.updateContent === wrapper;
   const drawing =
-    !CLICKABLE && linkApi
-      ? `omp's text renderer${patched ? "" : "; not patched, so with Extension Reply Renderers off replies show as written"}`
+    linkApi && !TERN_PATCH
+      ? CLICKABLE
+        ? textRenderersOn()
+          ? "omp's text renderer"
+          : "off: Extension Reply Renderers is off, so replies show as written"
+        : `omp's text renderer${patched ? "" : "; not patched, so with Extension Reply Renderers off replies show as written"}`
       : patched
         ? "patched"
         : "not patched (replies show as omp draws them)";
   const clicks = CLICKABLE
-    ? shared.watcher
-      ? `on (Tern; needs the omp-stretch Tern plugin; clicks land in ${CLICK_DIR})`
-      : `off: click watcher not running on ${CLICK_DIR}`
+    ? !TERN_PATCH && !textRenderersOn()
+      ? `off: ${TERN_HELP}; stretches are not requested`
+      : shared.watcher
+        ? `on (Tern; needs the omp-stretch Tern plugin; clicks land in ${CLICK_DIR})`
+        : `off: click watcher not running on ${CLICK_DIR}`
     : linkApi && pickable()
       ? "on: the link hint key (app.links.hint) tags each stretch to pick, or click one with tui.mouse on"
       : `off: ${PICK_HELP}; stretches drawn open`;
@@ -689,13 +709,15 @@ function pickHint(): string {
 const PICK_HELP =
   "needs omp 18.17.0 or newer with Tools → Extensions → Extension Reply Renderers (extensionRenderers.assistantText) on, and the link hint key (app.links.hint) bound or tui.mouse on";
 
+/** What draws stretch links in Tern on an omp without the patch (19.2 and newer). */
+const TERN_HELP = "on omp 19.2 or newer, turn on Tools → Extensions → Extension Reply Renderers (extensionRenderers.assistantText)";
+
 export default function stretch(pi: ExtensionAPI): void {
   linkApi = typeof pi.registerAssistantTextRenderer === "function" && typeof pi.registerLinkScheme === "function";
-  // Tern draws through the patch alone; a plain terminal carries on through omp's extension API.
-  if (!Component && (CLICKABLE || !linkApi)) return;
+  if (!Component && !linkApi) return;
   patch();
-  // In Tern too, where it draws nothing: a text renderer keeps omp loading this file before the
-  // first frame, so a resumed transcript goes through the patch instead of showing raw markup.
+  // In Tern with the patch too, where it draws nothing: a text renderer keeps omp loading this file
+  // before the first frame, so a resumed transcript goes through the patch instead of showing raw markup.
   if (linkApi) pi.registerAssistantTextRenderer(renderText);
   if (linkApi && !CLICKABLE) {
     pi.registerLinkScheme(LINK_SCHEME);
@@ -713,8 +735,12 @@ export default function stretch(pi: ExtensionAPI): void {
   /** The main session's last long reply had no stretches: the next prompt reminds the model once. */
   let lastPlain = false;
   const isMainTui = (ctx: { mode: string; agent: { kind: string } }) => ctx.mode === "tui" && ctx.agent.kind === "main";
-  /** Whether the reader can open a stretch: through the Tern plugin, or by picking the links omp routes here. */
-  const pickableIn = (ctx: ExtensionContext) => CLICKABLE || ctx.ui.getLinkClicksAvailable?.() === true;
+  /**
+   * Whether the reader can open a stretch: through the Tern plugin on links the patch or omp's text
+   * renderers draw, or by picking the links omp routes here.
+   */
+  const pickableIn = (ctx: ExtensionContext) =>
+    CLICKABLE ? TERN_PATCH || textRenderersOn() : ctx.ui.getLinkClicksAvailable?.() === true;
   const active = (ctx: ExtensionContext) => isMainTui(ctx) && pickableIn(ctx) && shared.mode !== "off";
   /** The last reply the footer hint was decided for, and the hint shown. */
   let hintReply: AssistantMessage | undefined;
@@ -806,7 +832,7 @@ export default function stretch(pi: ExtensionAPI): void {
         ctx.ui.notify("Usage: /stretch dense | light | section | off | status | update", "warning");
         return;
       }
-      const where = pickableIn(ctx) ? "" : " (here stretches are drawn open and never requested: see /stretch status)";
+      const where = pickableIn(ctx) ? "" : " (here stretches are never requested: see /stretch status)";
       ctx.ui.notify(`Stretchtext is ${modeOf()} for every omp session${where}.`, "info");
     },
   });
@@ -877,9 +903,9 @@ export default function stretch(pi: ExtensionAPI): void {
     if (!isMainTui(ctx)) return;
     followSession(ctx);
     announceUpdate(ctx);
+    shared.rerender = timestamp => ctx.ui.rerenderMessage?.(timestamp);
     if (!CLICKABLE) {
       shared.linkClicks = () => ctx.ui.getLinkClicksAvailable?.() === true;
-      shared.rerender = timestamp => ctx.ui.rerenderMessage?.(timestamp);
       shared.pressStatus = text => ctx.ui.setStatus?.(PRESS_STATUS_KEY, text);
       // Links appear and vanish without a new reply: a loaded session's become pickable only after
       // it loads, and `/stretch off` or a change of omp's settings redraws them open.
@@ -889,6 +915,7 @@ export default function stretch(pi: ExtensionAPI): void {
       return;
     }
     watchClicks();
+    if (!TERN_PATCH) return;
     // Borrow the TUI handle from a throwaway widget: a click redraw happens outside any render cycle.
     ctx.ui.setWidget("omp-stretch", tui => {
       shared.requestRender = () => tui.requestRender();
@@ -928,7 +955,7 @@ export default function stretch(pi: ExtensionAPI): void {
     if (entry !== undefined && entry.message !== message) {
       entry.message = message;
       // omp's text renderer gets each block's index in the whole reply, so only the patch's links change.
-      if (CLICKABLE) redraw(message.timestamp);
+      if (TERN_PATCH) redraw(message.timestamp);
     }
     if (!active(ctx)) return;
     message.content.forEach((block, i) => {

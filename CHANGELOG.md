@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.7.1 (2026-11-26)
+
+### Fixes
+
+- Stretches draw and open in Tern on omp 19.2 and newer, with Extension Reply Renderers on.
+
 ## 0.7.0 (2026-11-21)
 
 ### Features

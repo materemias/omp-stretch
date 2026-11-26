@@ -38,7 +38,9 @@ Then set it up for where you run omp:
   tern plugin link ~/.omp/plugins/node_modules/omp-stretch/tern-plugin
   ```
 
-Restart omp, then run `/stretch status`. Its `Clicks:` line should say `on`; if it says `off`, it lists what a plain terminal needs. Until then, stretches show fully open and the model isn't asked to write them.
+  On omp 19.2.0 or newer, also turn on **Extension Reply Renderers** as for a plain terminal: Tern draws the stretches through it.
+
+Restart omp, then run `/stretch status`. Its `Clicks:` line should say `on`; if it says `off`, it lists what is missing. Until then, the model isn't asked to write stretches, and replies that already hold some show them fully open (in Tern on omp 19.2.0 or newer, as raw `{{short|long}}` markup).
 
 Using omp on another machine through Tern remoting? Install the Tern plugin on both: on the machine running omp as above, and on the one whose Tern window you click in. The window side needs no omp:
 
@@ -97,7 +99,7 @@ Each of these runs fine on its own, and none needs setup for the others.
 
 ## Limits
 
-- **In Tern, it can break with any omp release.** Tern draws and clicks through a patch of an internal omp method and the Tern plugin. If that method is gone, the extension turns itself off; if it changes, the worst case is the raw `{{short|long}}` markup. Your sessions always keep the full text.
+- **In Tern on omp before 19.2.0, it can break with any omp release.** There, Tern draws through a patch of an internal omp method. If that method is gone, the extension turns itself off; if it changes, the worst case is the raw `{{short|long}}` markup. From omp 19.2.0, Tern draws through omp's extension API instead. Your sessions always keep the full text.
 - In a plain terminal, the links and picks go through omp's extension API and keep working without the patch. The patch only keeps replies readable while **Extension Reply Renderers** is off: without it, they show the raw markup there.
 - In a plain terminal, a stretch opens at once instead of growing word by word, and a ✦ answer appears when it's finished while the footer counts the seconds: redrawing a reply in scrollback rebuilds the whole scrollback, so neither can animate there.
 - Which stretches are open is forgotten when omp restarts.
